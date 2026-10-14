@@ -17,6 +17,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from market_structure import EVENT_COLUMNS, analyze_candles, methodology as structure_methodology
+
 SPOT_BASE = "https://api.binance.com"
 FUTURES_BASE = "https://fapi.binance.com"
 SOURCE_SPOT = "Binance Spot REST API"
@@ -58,8 +60,10 @@ class BinanceClient:
                 retryable = exc.code in (418, 429) or 500 <= exc.code < 600
                 if not retryable or attempt >= self.retries:
                     body = exc.read().decode("utf-8", errors="replace")[:500]
+                    exc.close()
                     raise BinanceAPIError(f"HTTP {exc.code} from {url}: {body}") from exc
                 retry_after = exc.headers.get("Retry-After")
+                exc.close()
                 delay = min(float(retry_after), 30.0) if retry_after and retry_after.isdigit() else min(2 ** attempt, 8)
             except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
                 if attempt >= self.retries:
@@ -166,11 +170,13 @@ def fetch_market_data(symbol: str, output_dir: Path, client: BinanceClient | Non
     work = output_dir / stem
     work.mkdir()
     write_csv(work / "klines.csv", klines, KLINE_COLUMNS)
+    structure_events = analyze_candles(klines)
+    write_csv(work / "market_structure.csv", structure_events, EVENT_COLUMNS)
     write_csv(work / "spot_price.csv", [ticker_row], ["symbol", "price", "captured_at_utc", "source"])
     write_csv(work / "spot_24h_stats.csv", [stat_row], list(stat_row.keys()))
     write_csv(work / "futures_open_interest.csv", optional["futures_open_interest.csv"], ["symbol", "open_interest", "exchange_time", "exchange_time_utc", "captured_at_utc", "source"])
     write_csv(work / "futures_funding_rate.csv", optional["futures_funding_rate.csv"], ["symbol", "funding_rate", "funding_time", "funding_time_utc", "captured_at_utc", "source"])
-    metadata = {"symbol": symbol, "captured_at_utc": captured_at, "binance_server_time": server_time, "binance_server_time_utc": utc_iso(server_time), "kline_limit_per_interval": limit, "intervals": list(INTERVALS), "collection_started_at_utc": collection_started_at, "sources": {"spot": SPOT_BASE, "futures": FUTURES_BASE}, "optional_endpoint_status": optional_status, "optional_endpoint_errors": errors, "notes": ["K 線只在 close_time 早於 Binance server time 時標記 is_closed=true。", "未平倉量端點未提供事件時間時，同時記錄擷取時間。", "未回傳的期貨欄位以空 CSV 表頭保留；端點錯誤及空資料狀態見本檔。"]}
+    metadata = {"symbol": symbol, "captured_at_utc": captured_at, "binance_server_time": server_time, "binance_server_time_utc": utc_iso(server_time), "kline_limit_per_interval": limit, "intervals": list(INTERVALS), "collection_started_at_utc": collection_started_at, "sources": {"spot": SPOT_BASE, "futures": FUTURES_BASE}, "optional_endpoint_status": optional_status, "optional_endpoint_errors": errors, "market_structure": {"methodology": structure_methodology(), "input_closed_kline_count": sum(row["is_closed"] == "true" for row in klines), "event_count": len(structure_events)}, "notes": ["K 線只在 close_time 早於 Binance server time 時標記 is_closed=true。", "未平倉量端點未提供事件時間時，同時記錄擷取時間。", "未回傳的期貨欄位以空 CSV 表頭保留；端點錯誤及空資料狀態見本檔。"]}
     (work / "metadata.json").write_text(json.dumps(metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     archive = output_dir / f"{stem}.zip"
     with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as zf:
