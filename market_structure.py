@@ -6,10 +6,12 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict
+from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, Iterable
 
-DETECTOR_VERSION = "market-structure-v1"
+DETECTOR_VERSION = "market-structure-v2"
+INTERVAL_MILLISECONDS = {"1d": 86_400_000, "4h": 14_400_000, "1h": 3_600_000}
 DEFAULT_LEFT_BARS = 2
 DEFAULT_RIGHT_BARS = 2
 DEFAULT_OB_LOOKBACK = 10
@@ -35,6 +37,7 @@ def methodology() -> dict[str, Any]:
         "fair_value_gap": "Three-candle wick gap: first high below third low (bullish), or first low above third high (bearish). Zone is the gap.",
         "two_b_fakeout": "The first wick breach of a confirmed swing that closes back inside on the breach candle or within the configured subsequent closed candles. A breach with no timely return is consumed and not relabeled later.",
         "structure_break": "First close beyond the latest confirmed swing high or low; included as evidence for order-block labels.",
+        "gap_handling": "Missing intervals split the candle series; no event may use evidence from both sides of a gap.",
         "limits": "Definitions are explicit implementation conventions, not universal market terminology. Labels describe historical candles and do not imply direction forecasts, entries, or exits.",
     }
 
@@ -58,6 +61,133 @@ def _candle_key(candle: dict[str, Any]) -> int:
         return int(candle["open_time"])
     except (KeyError, TypeError, ValueError) as exc:
         raise ValueError("K 線缺少有效的 open_time。") from exc
+
+
+def _timestamp(value: Any, field: str) -> int:
+    if isinstance(value, bool):
+        raise ValueError(f"K 線欄位 {field} 必須是非負整數毫秒時間戳。")
+    if isinstance(value, int):
+        result = value
+    elif isinstance(value, str) and value.strip().isdigit():
+        result = int(value.strip())
+    else:
+        raise ValueError(f"K 線欄位 {field} 必須是非負整數毫秒時間戳。")
+    if result < 0:
+        raise ValueError(f"K 線欄位 {field} 必須是非負整數毫秒時間戳。")
+    return result
+
+
+def _utc_timestamp(value: int) -> str:
+    try:
+        return datetime.fromtimestamp(value / 1000, tz=timezone.utc).isoformat()
+    except (OverflowError, OSError, ValueError):
+        return ""
+
+
+def inspect_candle_integrity(
+    rows: Iterable[dict[str, Any]], interval: str, server_time: int | None = None
+) -> dict[str, Any]:
+    """Report ordering, timestamp validity, and missing opens in the returned window."""
+    if interval not in INTERVAL_MILLISECONDS:
+        raise ValueError(f"不支援的 K 線週期：{interval}。")
+    step = INTERVAL_MILLISECONDS[interval]
+    candles = list(rows)
+    errors: list[dict[str, Any]] = []
+    gaps: list[dict[str, Any]] = []
+    closed_count = 0
+    previous_open: int | None = None
+
+    for index, row in enumerate(candles):
+        try:
+            open_time = _timestamp(row.get("open_time"), "open_time")
+            close_time = _timestamp(row.get("close_time"), "close_time")
+        except ValueError as exc:
+            errors.append({"kind": "invalid_timestamp", "row_index": index, "detail": str(exc)})
+            continue
+
+        if open_time % step != 0:
+            errors.append({"kind": "unaligned_open_time", "row_index": index, "open_time": open_time, "open_time_utc": _utc_timestamp(open_time)})
+        if close_time != open_time + step - 1:
+            errors.append({"kind": "invalid_close_time", "row_index": index, "open_time": open_time, "open_time_utc": _utc_timestamp(open_time), "close_time": close_time, "close_time_utc": _utc_timestamp(close_time), "expected_close_time": open_time + step - 1})
+        if server_time is not None and open_time > server_time:
+            errors.append({"kind": "future_open_time", "row_index": index, "open_time": open_time, "open_time_utc": _utc_timestamp(open_time), "server_time": server_time, "server_time_utc": _utc_timestamp(server_time)})
+        if _is_closed(row.get("is_closed")):
+            closed_count += 1
+
+        if previous_open is not None:
+            delta = open_time - previous_open
+            if delta == 0:
+                errors.append({"kind": "duplicate_open_time", "row_index": index, "open_time": open_time, "open_time_utc": _utc_timestamp(open_time)})
+            elif delta < 0:
+                errors.append({"kind": "out_of_order_open_time", "row_index": index, "previous_open_time": previous_open, "previous_open_time_utc": _utc_timestamp(previous_open), "open_time": open_time, "open_time_utc": _utc_timestamp(open_time)})
+            elif delta > step:
+                if delta % step:
+                    errors.append({"kind": "irregular_open_time_spacing", "row_index": index, "previous_open_time": previous_open, "previous_open_time_utc": _utc_timestamp(previous_open), "open_time": open_time, "open_time_utc": _utc_timestamp(open_time), "delta_milliseconds": delta})
+                else:
+                    first_missing = previous_open + step
+                    last_missing = open_time - step
+                    gaps.append({
+                        "previous_open_time": previous_open,
+                        "previous_open_time_utc": _utc_timestamp(previous_open),
+                        "first_missing_open_time": first_missing,
+                        "first_missing_open_time_utc": _utc_timestamp(first_missing),
+                        "last_missing_open_time": last_missing,
+                        "last_missing_open_time_utc": _utc_timestamp(last_missing),
+                        "next_open_time": open_time,
+                        "next_open_time_utc": _utc_timestamp(open_time),
+                        "missing_candle_count": delta // step - 1,
+                    })
+        previous_open = open_time
+
+    missing_count = sum(gap["missing_candle_count"] for gap in gaps)
+    if errors:
+        status = "invalid"
+        suitability = "unavailable"
+    elif gaps:
+        status = "gaps_detected"
+        suitability = "partial_gap_segmented"
+    elif not candles:
+        status = "empty"
+        suitability = "unavailable"
+    else:
+        status = "complete"
+        suitability = "complete_within_returned_window"
+    return {
+        "interval": interval,
+        "interval_milliseconds": step,
+        "received_candle_count": len(candles),
+        "closed_candle_count": closed_count,
+        "unclosed_candle_count": len(candles) - closed_count,
+        "missing_candle_count": missing_count,
+        "is_contiguous": bool(candles) and not errors and not gaps,
+        "status": status,
+        "analysis_suitability": suitability,
+        "gaps": gaps,
+        "errors": errors,
+    }
+
+
+def _split_contiguous(rows: list[dict[str, Any]], interval: str) -> list[list[dict[str, Any]]]:
+    report = inspect_candle_integrity(rows, interval)
+    if report["errors"]:
+        first = report["errors"][0]
+        raise ValueError(f"{interval} K 線完整性檢查失敗：{first['kind']}。")
+    if not rows:
+        return []
+    step = INTERVAL_MILLISECONDS[interval]
+    segments: list[list[dict[str, Any]]] = []
+    current: list[dict[str, Any]] = []
+    previous_open: int | None = None
+    for row in rows:
+        open_time = _timestamp(row.get("open_time"), "open_time")
+        if previous_open is not None and open_time - previous_open != step:
+            segments.append(current)
+            current = []
+        current.append(row)
+        previous_open = open_time
+    if current:
+        segments.append(current)
+    return segments
 
 
 def _evidence(role_candles: list[tuple[str, dict[str, Any]]]) -> str:
@@ -133,19 +263,23 @@ def _analyze_interval(
     if not rows:
         return []
     symbol, interval = str(rows[0]["symbol"]), str(rows[0]["interval"])
-    rows = sorted(rows, key=_candle_key)
     seen: set[int] = set()
+    previous_open: int | None = None
     for row in rows:
         if row.get("symbol") != symbol or row.get("interval") != interval:
             raise ValueError("同一分析批次不可混合不同交易對或週期。")
         open_time = _candle_key(row)
         if open_time in seen:
             raise ValueError(f"重複的 K 線 open_time：{open_time}。")
+        if previous_open is not None and open_time < previous_open:
+            raise ValueError("K 線 open_time 順序錯誤。")
         seen.add(open_time)
+        previous_open = open_time
         if not _is_closed(row.get("is_closed")):
             raise ValueError("市場結構只能使用已收盤 K 線。")
-        for field in ("open", "high", "low", "close", "volume"):
-            _num(row, field)
+        open_price, high, low, close, volume = (_num(row, field) for field in ("open", "high", "low", "close", "volume"))
+        if volume < 0 or low > min(open_price, close) or high < max(open_price, close) or low > high:
+            raise ValueError("K 線 OHLC 或成交量完整性檢查失敗。")
 
     params = {
         "left_bars": left_bars,
@@ -278,6 +412,7 @@ def analyze_candles(
         grouped[(str(candle.get("symbol", "")), str(candle.get("interval", "")))].append(dict(candle))
     result: list[dict[str, Any]] = []
     for key in sorted(grouped):
-        result.extend(_analyze_interval(grouped[key], left_bars, right_bars, ob_lookback, two_b_return_bars))
+        for segment in _split_contiguous(grouped[key], key[1]):
+            result.extend(_analyze_interval(segment, left_bars, right_bars, ob_lookback, two_b_return_bars))
     result.sort(key=lambda row: (row["symbol"], row["interval"], int(row["confirmed_at_close_time"]), row["event_type"], row["event_id"]))
     return result

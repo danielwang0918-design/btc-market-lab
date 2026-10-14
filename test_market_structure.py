@@ -112,6 +112,46 @@ class MarketStructureTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             structure.analyze_candles([row], left_bars=0)
 
+    def test_gap_splits_candles_so_fvg_cannot_bridge_missing_bar(self):
+        rows = [
+            candle(0, open_=9, high=10, low=8, close=9),
+            candle(1, open_=9, high=10.5, low=8.5, close=10),
+            candle(3, open_=11, high=12, low=11, close=11.5),
+        ]
+        report = structure.inspect_candle_integrity(rows, "1h")
+        self.assertEqual(report["missing_candle_count"], 1)
+        self.assertEqual(report["gaps"][0]["first_missing_open_time"], 2 * 3_600_000)
+        events = structure.analyze_candles(rows, left_bars=1, right_bars=1)
+        self.assertEqual(patterns(events, "fair_value_gap"), [])
+
+    def test_out_of_order_candles_are_rejected_not_silently_sorted(self):
+        rows = [
+            candle(2, open_=9, high=10, low=8, close=9),
+            candle(1, open_=9, high=10, low=8, close=9),
+        ]
+        with self.assertRaisesRegex(ValueError, "out_of_order_open_time"):
+            structure.analyze_candles(rows)
+
+    def test_appending_future_candles_does_not_rewrite_confirmed_events(self):
+        rows = [
+            candle(0, open_=9, high=10, low=8, close=9),
+            candle(1, open_=10, high=12, low=9, close=11),
+            candle(2, open_=11, high=11, low=8, close=10),
+            candle(3, open_=9, high=10, low=7, close=8),
+            candle(4, open_=8, high=9, low=6, close=7),
+            candle(5, open_=8, high=14, low=8, close=13),
+            candle(6, open_=13, high=13, low=10, close=12),
+            candle(7, open_=12, high=13, low=9, close=10),
+            candle(8, open_=10, high=15, low=9, close=14),
+            candle(9, open_=14, high=14, low=11, close=12),
+        ]
+        prefix = rows[:6]
+        prefix_events = structure.analyze_candles(prefix, left_bars=1, right_bars=1)
+        full_events = structure.analyze_candles(rows, left_bars=1, right_bars=1)
+        cutoff = prefix[-1]["close_time"]
+        already_confirmed = [event for event in full_events if int(event["confirmed_at_close_time"]) <= cutoff]
+        self.assertEqual(prefix_events, already_confirmed)
+
 
 if __name__ == "__main__":
     unittest.main()

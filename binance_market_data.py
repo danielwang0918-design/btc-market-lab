@@ -17,7 +17,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from market_structure import EVENT_COLUMNS, analyze_candles, methodology as structure_methodology
+from market_structure import (
+    EVENT_COLUMNS,
+    INTERVAL_MILLISECONDS,
+    analyze_candles,
+    inspect_candle_integrity,
+    methodology as structure_methodology,
+)
 
 SPOT_BASE = "https://api.binance.com"
 FUTURES_BASE = "https://fapi.binance.com"
@@ -84,27 +90,43 @@ def validate_symbol(symbol: str) -> str:
 def validate_klines(raw: Any, symbol: str, interval: str, server_time: int) -> list[dict[str, Any]]:
     if not isinstance(raw, list) or not raw:
         raise BinanceAPIError(f"{interval} K 線回應為空或格式錯誤。")
+    if interval not in INTERVAL_MILLISECONDS:
+        raise BinanceAPIError(f"不支援的 K 線週期：{interval}。")
+    if type(server_time) is not int or server_time < 0:
+        raise BinanceAPIError("Binance server time 必須是非負整數毫秒時間戳。")
     rows: list[dict[str, Any]] = []
-    previous_open = -1
+
+    def parse_timestamp(value: Any) -> int:
+        if type(value) is int:
+            return value
+        if isinstance(value, str) and value.strip().isdigit():
+            return int(value.strip())
+        raise ValueError("時間戳必須是非負整數毫秒。")
+
     for item in raw:
         if not isinstance(item, list) or len(item) < 7:
             raise BinanceAPIError(f"{interval} K 線欄位不足。")
         try:
-            open_time, close_time = int(item[0]), int(item[6])
+            open_time, close_time = parse_timestamp(item[0]), parse_timestamp(item[6])
             values = [float(item[i]) for i in (1, 2, 3, 4, 5)]
         except (ValueError, TypeError, IndexError) as exc:
-            raise BinanceAPIError(f"{interval} K 線包含非數值欄位。") from exc
+            raise BinanceAPIError(f"{interval} K 線包含無效數值或時間戳。") from exc
         open_price, high, low, close, volume = values
         if not all(math.isfinite(value) for value in values):
             raise BinanceAPIError(f"{interval} K 線包含非有限數值。")
-        if open_time <= previous_open or close_time < open_time:
-            raise BinanceAPIError(f"{interval} K 線時間順序或時間範圍錯誤。")
         if min(open_price, high, low, close) <= 0 or volume < 0 or low > min(open_price, close) or high < max(open_price, close) or low > high:
             raise BinanceAPIError(f"{interval} K 線價格或成交量完整性檢查失敗。")
-        previous_open = open_time
-        rows.append({"symbol": symbol, "interval": interval, "open_time": open_time, "open_time_utc": utc_iso(open_time),
+        rows.append({"symbol": symbol, "interval": interval, "open_time": open_time,
                      "open": item[1], "high": item[2], "low": item[3], "close": item[4], "volume": item[5],
-                     "close_time": close_time, "close_time_utc": utc_iso(close_time), "is_closed": str(close_time < server_time).lower(), "source": SOURCE_SPOT})
+                     "close_time": close_time, "is_closed": str(close_time < server_time).lower(), "source": SOURCE_SPOT})
+
+    report = inspect_candle_integrity(rows, interval, server_time)
+    if report["errors"]:
+        first = report["errors"][0]
+        raise BinanceAPIError(f"{interval} K 線時間完整性檢查失敗：{first['kind']}（{first}）。")
+    for row in rows:
+        row["open_time_utc"] = utc_iso(row["open_time"])
+        row["close_time_utc"] = utc_iso(row["close_time"])
     return rows
 
 
@@ -129,6 +151,20 @@ def fetch_market_data(symbol: str, output_dir: Path, client: BinanceClient | Non
     for interval in INTERVALS:
         raw = client.get_json(SPOT_BASE, "/api/v3/klines", {"symbol": symbol, "interval": interval, "limit": limit})
         klines.extend(validate_klines(raw, symbol, interval, server_time))
+    integrity_by_interval = {
+        interval: inspect_candle_integrity([row for row in klines if row["interval"] == interval], interval, server_time)
+        for interval in INTERVALS
+    }
+    if any(report["errors"] for report in integrity_by_interval.values()):
+        raise BinanceAPIError("K 線完整性檢查發現無效資料，已中止輸出。")
+    has_gaps = any(report["gaps"] for report in integrity_by_interval.values())
+    data_integrity = {
+        "status": "gaps_detected" if has_gaps else "complete",
+        "is_contiguous": not has_gaps,
+        "analysis_suitability": "partial_gap_segmented" if has_gaps else "complete_within_returned_window",
+        "scope": "僅檢查 API 本次回傳的時間範圍；請求 limit 是上限，不代表更早的歷史資料也已檢查。",
+        "intervals": integrity_by_interval,
+    }
     ticker = client.get_json(SPOT_BASE, "/api/v3/ticker/price", {"symbol": symbol})
     ticker_captured_at = now_iso()
     stats = client.get_json(SPOT_BASE, "/api/v3/ticker/24hr", {"symbol": symbol})
@@ -176,7 +212,31 @@ def fetch_market_data(symbol: str, output_dir: Path, client: BinanceClient | Non
     write_csv(work / "spot_24h_stats.csv", [stat_row], list(stat_row.keys()))
     write_csv(work / "futures_open_interest.csv", optional["futures_open_interest.csv"], ["symbol", "open_interest", "exchange_time", "exchange_time_utc", "captured_at_utc", "source"])
     write_csv(work / "futures_funding_rate.csv", optional["futures_funding_rate.csv"], ["symbol", "funding_rate", "funding_time", "funding_time_utc", "captured_at_utc", "source"])
-    metadata = {"symbol": symbol, "captured_at_utc": captured_at, "binance_server_time": server_time, "binance_server_time_utc": utc_iso(server_time), "kline_limit_per_interval": limit, "intervals": list(INTERVALS), "collection_started_at_utc": collection_started_at, "sources": {"spot": SPOT_BASE, "futures": FUTURES_BASE}, "optional_endpoint_status": optional_status, "optional_endpoint_errors": errors, "market_structure": {"methodology": structure_methodology(), "input_closed_kline_count": sum(row["is_closed"] == "true" for row in klines), "event_count": len(structure_events)}, "notes": ["K 線只在 close_time 早於 Binance server time 時標記 is_closed=true。", "未平倉量端點未提供事件時間時，同時記錄擷取時間。", "未回傳的期貨欄位以空 CSV 表頭保留；端點錯誤及空資料狀態見本檔。"]}
+    metadata = {
+        "symbol": symbol,
+        "captured_at_utc": captured_at,
+        "binance_server_time": server_time,
+        "binance_server_time_utc": utc_iso(server_time),
+        "kline_limit_per_interval": limit,
+        "intervals": list(INTERVALS),
+        "collection_started_at_utc": collection_started_at,
+        "sources": {"spot": SPOT_BASE, "futures": FUTURES_BASE},
+        "optional_endpoint_status": optional_status,
+        "optional_endpoint_errors": errors,
+        "data_integrity": data_integrity,
+        "market_structure": {
+            "methodology": structure_methodology(),
+            "input_closed_kline_count": sum(row["is_closed"] == "true" for row in klines),
+            "event_count": len(structure_events),
+            "gap_handling": "市場結構事件只在各自連續 K 線區段內計算；缺口兩側不會共用證據。",
+        },
+        "notes": [
+            "K 線只在 close_time 早於 Binance server time 時標記 is_closed=true。",
+            "未平倉量端點未提供事件時間時，同時記錄擷取時間。",
+            "未回傳的期貨欄位以空 CSV 表頭保留；端點錯誤及空資料狀態見本檔。",
+            "時間戳錯誤、重複、錯序或未來開盤時間會中止輸出；缺漏 K 線會記錄並讓結構偵測分段。",
+        ],
+    }
     (work / "metadata.json").write_text(json.dumps(metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     archive = output_dir / f"{stem}.zip"
     with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as zf:
