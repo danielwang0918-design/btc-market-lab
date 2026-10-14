@@ -73,6 +73,7 @@ class MarketDataTests(unittest.TestCase):
                 self.assertEqual(metadata["optional_endpoint_errors"], {})
                 self.assertEqual(metadata["optional_endpoint_status"], {"futures_open_interest": "available", "futures_funding_rate": "available"})
                 self.assertEqual(metadata["market_structure"]["event_count"], 0)
+                self.assertEqual(metadata["market_structure"]["methodology"]["default_parameters"], {"left_bars": 2, "right_bars": 2, "order_block_lookback_bars": 10, "two_b_return_bars": 2})
 
     def test_optional_futures_failure_is_recorded(self):
         client = FakeClient()
