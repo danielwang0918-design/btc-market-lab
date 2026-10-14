@@ -65,13 +65,14 @@ class MarketDataTests(unittest.TestCase):
             archive = market.fetch_market_data("BTCUSDT", Path(temp), FakeClient(), limit=1)
             self.assertTrue(archive.is_file())
             with zipfile.ZipFile(archive) as zf:
-                self.assertEqual(set(zf.namelist()), {"klines.csv", "spot_price.csv", "spot_24h_stats.csv", "futures_open_interest.csv", "futures_funding_rate.csv", "metadata.json"})
+                self.assertEqual(set(zf.namelist()), {"klines.csv", "spot_price.csv", "spot_24h_stats.csv", "futures_open_interest.csv", "futures_funding_rate.csv", "market_structure.csv", "metadata.json"})
                 rows = list(csv.DictReader(zf.open("klines.csv").read().decode("utf-8-sig").splitlines()))
                 self.assertEqual(len(rows), 3)
                 self.assertTrue(all(row["source"] == market.SOURCE_SPOT for row in rows))
                 metadata = json.loads(zf.read("metadata.json"))
                 self.assertEqual(metadata["optional_endpoint_errors"], {})
                 self.assertEqual(metadata["optional_endpoint_status"], {"futures_open_interest": "available", "futures_funding_rate": "available"})
+                self.assertEqual(metadata["market_structure"]["event_count"], 0)
 
     def test_optional_futures_failure_is_recorded(self):
         client = FakeClient()
