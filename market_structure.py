@@ -28,6 +28,7 @@ EVENT_COLUMNS = [
 def methodology() -> dict[str, Any]:
     return {
         "detector_version": DETECTOR_VERSION,
+        "default_parameters": {"left_bars": DEFAULT_LEFT_BARS, "right_bars": DEFAULT_RIGHT_BARS, "order_block_lookback_bars": DEFAULT_OB_LOOKBACK, "two_b_return_bars": DEFAULT_2B_RETURN_BARS},
         "closed_candles_only": True,
         "swing": "Strict local high/low over a centered window; confirmed only after the configured number of right-side closed candles.",
         "order_block": "The last opposing-color candle within the lookback before a candle closes beyond the latest confirmed swing; zone is that candle's full low-to-high range.",
