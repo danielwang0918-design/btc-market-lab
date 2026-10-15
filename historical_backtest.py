@@ -669,9 +669,6 @@ def _simulate_slice(
                     elif (not _candidate_allowed(candidate_now, minimum_net_rr, max_setup_age_hours)
                           or candidate_now.get("setup_id") != pending.get("setup_id")):
                         pending = None
-                    if pending and candidate_now and candidate_now.get("setup_id") == pending.get("setup_id"):
-                        pending = dict(candidate_now)
-                        pending["signal_index"] = int(candidate_now["signal_index"])
 
         candidate = current_snapshot.get("candidate")
         if position is None and pending is None and current_snapshot.get("integrity_ok"):
