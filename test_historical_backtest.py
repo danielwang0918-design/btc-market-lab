@@ -49,6 +49,31 @@ def signal(index=0, *, side="long", zone_low="90", zone_high="100", entry="100",
     }
 
 
+class PaginatedKlineClient:
+    def __init__(self, server_time):
+        self.server_time = server_time
+        self.step = 3_600_000
+        self.pages = 0
+
+    def get_json(self, base, path, params=None):
+        if path == "/api/v3/time":
+            return {"serverTime": self.server_time}
+        if path != "/api/v3/klines":
+            raise AssertionError(f"Unexpected endpoint: {path}")
+        self.pages += 1
+        start = int(params["startTime"])
+        end = int(params["endTime"])
+        limit = int(params["limit"])
+        result = []
+        for opened in range(start, end + 1, self.step):
+            if len(result) >= limit:
+                break
+            result.append([
+                opened, "100", "102", "99", "101", "10", opened + self.step - 1,
+            ])
+        return result
+
+
 class P0HistoryTests(unittest.TestCase):
     def test_strategy_events_match_canonical_closed_candle_labels(self):
         closes = [10, 12, 9, 11, 13, 10, 14, 8, 9, 15, 13, 16, 11, 17, 12,
@@ -82,6 +107,18 @@ class P0HistoryTests(unittest.TestCase):
             self.assertTrue(evidence)
             self.assertTrue(all(item["is_closed"] == "true" for item in evidence))
             self.assertTrue(all(int(item["close_time"]) <= int(event["confirmed_at_close_time"]) for item in evidence))
+
+    def test_historical_download_paginates_and_keeps_only_closed_bars(self):
+        step = market_structure.INTERVAL_MILLISECONDS["1h"]
+        client = PaginatedKlineClient(server_time=6 * step)
+        rows = hb.fetch_historical_candles(
+            "BTCUSDT", "1h", 0, 5 * step, client=client, page_limit=2,
+        )
+        self.assertEqual(len(rows), 5)
+        self.assertEqual(client.pages, 3)
+        self.assertEqual([int(row["open_time"]) for row in rows], [i * step for i in range(5)])
+        self.assertTrue(all(row["is_closed"] == "true" for row in rows))
+        self.assertTrue(all(row["source"] == "Binance Spot REST API" for row in rows))
 
     def test_csv_rows_keep_timestamp_strings_for_evidence_lookup(self):
         with tempfile.TemporaryDirectory() as temporary:
