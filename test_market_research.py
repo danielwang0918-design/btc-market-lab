@@ -175,6 +175,27 @@ class MarketResearchTests(unittest.TestCase):
         self.assertEqual(len(report["evidence"]["structure_breaks"]["1d"]["evidence"]), 1)
         self.assertEqual(report["evidence"]["setup_order_block"]["event_id"], "1h-ob")
 
+    def test_scheduled_critical_event_suspends_candidate_and_upcoming_event_requires_reassessment(self):
+        with tempfile.TemporaryDirectory() as temp:
+            archive = make_bundle(Path(temp) / "market.zip")
+            calendar_path = Path(temp) / "calendar.json"
+            event = {
+                "event_id": "fixture-cpi", "title": "CPI release", "category": "cpi",
+                "event_time_utc": NOW.isoformat(), "source_name": "BLS", "source_url": "https://www.bls.gov/",
+                "affected_scope": ["BTCUSDT"], "severity": "critical",
+            }
+            calendar_path.write_text(json.dumps({"last_sync_at_utc": NOW.isoformat(), "events": [event]}), encoding="utf-8")
+            blocked = research.build_analysis(archive, config(), now=NOW, event_calendar_path=calendar_path)
+            event["event_time_utc"] = (NOW + timedelta(hours=4)).isoformat()
+            calendar_path.write_text(json.dumps({"last_sync_at_utc": NOW.isoformat(), "events": [event]}), encoding="utf-8")
+            reassess = research.build_analysis(archive, config(), now=NOW, event_calendar_path=calendar_path)
+        self.assertEqual(blocked["status"], "不適合開單")
+        self.assertEqual(blocked["execution_state"], "事件風險暫停")
+        self.assertEqual(blocked["checks"]["event_risk"]["candidate_action"], "no_trade")
+        self.assertEqual(reassess["status"], "候選做多")
+        self.assertEqual(reassess["execution_state"], "事件前重新評估")
+        self.assertEqual(reassess["checks"]["event_risk"]["candidate_action"], "reassess")
+
     def test_zone_touch_marks_trigger_but_touching_stop_invalidates(self):
         with tempfile.TemporaryDirectory() as temp:
             triggered_archive = make_bundle(Path(temp) / "triggered.zip", quote="98")
@@ -318,3 +339,4 @@ class MarketResearchTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
