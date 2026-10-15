@@ -68,6 +68,31 @@ python3 p1_research.py BTCUSDT
 
 四個版本使用相同的費率、滑價、停損優先、時間順序切分與缺口分段。版本定義和兩根 K 線窗口不在 test 結果出爐後調整；test 是一次性的留出檢查，不用來挑參數。若某版本交易筆數很少，應視為證據不足。這個研究比較只對照 `historical_backtest.py` 的 P0 1H 基準，不會自動改變即時/手動研究候選規則；只有穩定的留出資料表現與足夠樣本才適合考慮升級策略版本。
 
+### P1：合約市場歷史資料與清算事件
+
+新工具 `derivatives_research.py` 專門處理 Binance USDⓈ-M 永續合約公開資料。先下載指定日期區間，再產生時間對齊的價格/OI 比較與資金費率極端值標記：
+
+```bash
+python3 derivatives_research.py download BTCUSDT --start 2026-09-15 --period 1h --interval 1h
+python3 derivatives_research.py analyze BTCUSDT --period 1h --interval 1h
+```
+
+下載器會分頁並增量合併 CSV，收集 OI 歷史、資金費率歷史、全市場帳戶多空比、主動買/賣量、taker 多空比及合約 K 線（含主動買入量）。分析檔會按時間戳對齊已收盤合約 K 線，分別列出價格變化、OI 名目價值變化、同期多空比和主動買賣量；價量/OI 的四種組合只是同步狀態標籤，不會被解釋為「新增多單」或「新增空單」。
+
+資金費率使用嚴格早於該筆資料的前 30 日絕對費率第 95 百分位作極端值門檻，至少需要 30 筆先前紀錄；樣本不足時標示 `insufficient_history`。這個門檻是透明、可重算的統計標籤，不代表交易訊號。費率正負只說明費率方向，不足以推斷市場淨持倉。
+
+Binance 公開 OI 統計、多空比及 taker 歷史統計目前只提供最近 30 天，且每次最多 500 筆；資金費率歷史另由其端點分頁下載。若要求區間早於保留期，metadata 會記錄實際可請求的起點，而不會補造資料。不同資料序列的 coverage 會各自寫入 `BTCUSDT_derivatives_metadata.json`。
+
+清算事件可從開始記錄時起保存：
+
+```bash
+python3 derivatives_research.py record-liquidations BTCUSDT
+# 按 Ctrl-C 停止記錄
+python3 derivatives_research.py liquidation-heatmap BTCUSDT --price-bin-usd 100
+```
+
+熱區 CSV 將已觀測的強平快照按實際平均成交價分箱，並分開彙總多方被清算（SELL）與空方被清算（BUY）的數量和名目值。Binance 每個交易對每秒最多推送一筆強平快照，這不是完整逐筆強平資料；REST API 也沒有可回補的全市場歷史清算清單。因此熱區只代表本機開始記錄後觀察到的事件聚集，**不是**未觸發倉位的預估清算價或未來必達區域。推估潛在清算價需要帳戶槓桿、入場價、保證金模式和維持保證金等未公開的持倉資料，本工具不會假裝能從 OI 或資金費率推算。
+
 ## v1 分析規則與狀態
 
 策略規則完整寫在設定檔及程式版本 `mtf-bos-ob-retest-v1` 中：
