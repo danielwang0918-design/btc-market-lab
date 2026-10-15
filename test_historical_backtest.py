@@ -225,6 +225,7 @@ class P0HistoryTests(unittest.TestCase):
         self.assertEqual(report["selection_status"], "insufficient_validation_trades_fallback")
         self.assertEqual(report["selected_parameters"], {"minimum_net_rr": 1.5, "max_setup_age_hours": 168})
         self.assertTrue(all(not row["test_was_used_for_selection"] for row in report["candidates"]))
+        self.assertTrue(all("test" not in row for row in report["candidates"]))
 
     def test_end_to_end_snapshot_engine_uses_three_closed_timeframes(self):
         with tempfile.TemporaryDirectory() as temporary:
