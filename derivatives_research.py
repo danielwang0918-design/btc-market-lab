@@ -369,8 +369,8 @@ def analyze(symbol: str, data_dir: Path, interval: str = "1h", period: str = "1h
                         "global_long_short_ratio": extra[0].get("longShortRatio"),
                         "global_long_account": extra[0].get("longAccount"), "global_short_account": extra[0].get("shortAccount"),
                         "taker_buy_volume": extra[1].get("buyVol"), "taker_sell_volume": extra[1].get("sellVol"),
-                        "taker_buy_sell_ratio": extra[1].get("buySellRatio"),
-                        "taker_buy_sell_position_ratio": extra[2].get("buySellRatio"),
+                        "taker_volume_buy_sell_ratio": extra[1].get("buySellRatio"),
+                        "taker_flow_buy_sell_ratio": extra[2].get("buySellRatio"),
                         "interpretation_note": "描述同步變化，不由單一欄位推斷全市場多空部位。"})
         previous_oi, previous_price = row, candle
     funding_values = [(time_key(row), float(row["fundingRate"])) for row in funding_rows if row.get("fundingRate") not in (None, "")]
