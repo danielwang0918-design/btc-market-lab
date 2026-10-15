@@ -116,6 +116,19 @@ class HistoricalBacktestTests(unittest.TestCase):
         segments = backtest._contiguous_segments(rows)
         self.assertEqual([len(segment) for segment in segments], [1, 1])
 
+    def test_backtest_reports_dataset_coverage_and_normalized_exchange_times(self):
+        step = INTERVAL_MILLISECONDS["1h"]
+        start = 1_700_000_000_000 // step * step
+        rows = [candle(start + i * step, 100, 102, 99, 101) for i in range(12)]
+        rows[0]["exchange_close_time"] = start + 1000
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "BTCUSDT_1h.csv"
+            backtest.save_csv(path, rows)
+            report = backtest.run_backtest(path, "BTCUSDT")
+        self.assertEqual(report["data_summary"]["closed_candles"], 12)
+        self.assertEqual(report["data_summary"]["start_utc"], rows[0]["open_time_utc"])
+        self.assertEqual(report["data_summary"]["normalized_exchange_close_time_count"], 1)
+
     def test_metrics_cover_expectancy_drawdown_and_loss_streak(self):
         trades = [
             {"net_pnl_per_unit": 2.0, "r_multiple": 1.0},
