@@ -326,7 +326,8 @@ def _p0_events(rows: list[dict[str, Any]], *, left_bars: int = 2, right_bars: in
             confirmed_close = int(candle["close_time"])
             event_id = f"{candle['symbol']}:1h:structure_break:{direction}:{candle['open_time']}"
             events.append({"event_type": "structure_break", "direction": direction,
-                           "confirmed_at_close_time": confirmed_close, "event_id": event_id})
+                           "confirmed_at_close_time": confirmed_close, "reference_price": str(level),
+                           "event_id": event_id})
             start = max(confirmed_idx, index - ob_lookback)
             opposing = next((j for j in range(index - 1, start - 1, -1)
                              if (float(rows[j]["close"]) < float(rows[j]["open"]) if direction == "bullish"
@@ -336,6 +337,7 @@ def _p0_events(rows: list[dict[str, Any]], *, left_bars: int = 2, right_bars: in
                 events.append({"event_type": "order_block", "direction": direction,
                                "confirmed_at_close_time": confirmed_close,
                                "price_low": str(ob["low"]), "price_high": str(ob["high"]),
+                               "formed_at_open_time": int(ob["open_time"]),
                                "event_id": f"{event_id}:ob"})
     return events
 
