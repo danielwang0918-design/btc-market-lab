@@ -49,6 +49,13 @@ class EventRiskTests(unittest.TestCase):
         self.assertEqual(result["candidate_action"], "manual_review")
         self.assertTrue(result["calendar_stale"])
 
+    def test_incomplete_rss_sync_requires_manual_review(self):
+        calendar = {"status": "available", "events": [], "last_sync_at_utc": NOW.isoformat(), "sync_errors": ["SEC RSS unavailable"]}
+        result = event_risk.evaluate_event_risk(calendar, NOW)
+        self.assertEqual(result["candidate_action"], "manual_review")
+        self.assertEqual(result["status"], "incomplete_calendar")
+        self.assertTrue(result["incomplete_sources"])
+
     def test_manual_event_persists_in_calendar(self):
         with TemporaryDirectory() as directory:
             path = Path(directory) / "calendar.json"
