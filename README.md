@@ -45,9 +45,9 @@ python3 historical_backtest.py download BTCUSDT --interval 1d --start 2017-08-17
 python3 historical_backtest.py backtest BTCUSDT --fee-bps-per-side 10 --slippage-bps-per-side 5 --target-r 2
 ```
 
-下載器沿用本專案 Binance client 的逾時、有限次重試與退避，並檢查 OHLCV、時間對齊與收盤狀態。回傳範圍內若有缺口，會保留 CSV 並在下載摘要列出；回測會拒絕含缺口的 1H 檔，避免假設缺漏期間沒有觸發停損。資料只納入已收盤 K 線。
+下載器沿用本專案 Binance client 的逾時、有限次重試與退避，並檢查 OHLCV、時間對齊與收盤狀態。Binance 歷史回應有時以時段內最後成交時間作為 `close_time`；CSV 同時保留 `exchange_close_time` 原值，並以週期邊界作為 `close_time` 供連續性檢查和回測。回傳範圍內若有缺口，會保留 CSV 並在下載摘要列出；回測會在缺口切段，結構判定和持倉都不跨越缺口。資料只納入已收盤 K 線。
 
-P0 回測策略版本為 `structure_break_with_order_block_v1`：只在 1H 已收盤結構突破與 OB 同時確認後產生訊號，下一根 1H 開盤進場，以 OB 外緣作停損，目標採固定 R。費率和滑價均按進出場每一側計入。若同一根 K 線同時觸及停損和目標，按停損先到處理；跨越資料切分邊界的持倉不會延伸到下一段，而在該段最後收盤平倉。資料依時間順序切成 train/validation/test（預設 60%/20%/20%），輸出各段交易數、勝率、平均盈虧、期望值 R、profit factor、最大回撤 R、連敗數，以及依方向和 setup 的統計。完整交易明細和切分界線寫入 JSON。
+P0 回測策略版本為 `structure_break_with_order_block_v1`：只在 1H 已收盤結構突破與 OB 同時確認後產生訊號，下一根 1H 開盤進場，以 OB 外緣作停損，目標採固定 R。回測只串流計算 BOS/OB 所需事件，避免完整結構標籤器在大樣本上計算不必要的事件。費率和滑價均按進出場每一側計入。若同一根 K 線同時觸及停損和目標，按停損先到處理；跨越缺口或資料切分邊界的持倉不會延伸到下一段，而在該段最後收盤平倉。資料依時間順序切成 train/validation/test（預設 60%/20%/20%），輸出各段交易數、勝率、平均盈虧、期望值 R、profit factor、最大回撤 R、連敗數，以及依方向和 setup 的統計。完整交易明細和切分界線寫入 JSON。
 
 這是供驗證資料和程式流程的基準回測，不表示策略有效；目前沒有參數搜尋、資金曲線倉位模型、點差/流動性模型或策略優化。預設每筆一單位作比較，績效仍可能受市場微結構及 OHLC 模擬限制影響。此功能只讀公開行情，不登入帳戶、不送出訂單。
 
