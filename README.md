@@ -115,7 +115,7 @@ python3 market_research.py journal ANALYSIS_ID \
 
 ## P0：歷史資料下載、正式策略回測與參數比較
 
-歷史研究使用 `historical_backtest.py`。它可分頁下載 Binance 現貨歷史 K 線，支援 `1d`、`4h`、`1h`，保留資料缺口；預設歷史起點為 BTC 現貨的 `2017-08-17`。首次下載：
+歷史研究使用 `historical_backtest.py`。它可分頁下載 Binance 現貨歷史 K 線，支援 `1d`、`4h`、`1h`，保留資料缺口；預設歷史起點為 BTC 現貨的 `2017-08-17`。首次下載： 歷史資料請求使用 Binance 官方公開市場資料主機 `data-api.binance.vision`，避開一般 API 主機在部分執行環境回傳地區限制的情形；這只提供公開行情，不需要 API Key。
 
 ```bash
 python3 historical_backtest.py download-all BTCUSDT
