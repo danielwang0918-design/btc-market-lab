@@ -82,6 +82,12 @@ class BacktestFillTests(unittest.TestCase):
     def test_order_cannot_fill_when_next_bar_misses_zone(self):
         self.assertIsNone(self.simulate([bar(0, open_=101, high=103, low=101, close=102)]))
 
+    def test_waiting_candidate_can_place_order_for_the_next_candle(self):
+        report = {"status": "候選做多", "execution_state": "等待觸發", "scenario": {"entry_event_id": "ob-1"}}
+        self.assertEqual(backtest._entry_scenario(report), report["scenario"])
+        report["status"] = "不適合開單"
+        self.assertIsNone(backtest._entry_scenario(report))
+
     def test_stop_wins_when_stop_and_target_hit_in_same_candle(self):
         trade = self.simulate([bar(0, open_=100, high=111, low=94, close=105)])
         self.assertEqual(trade["exit_reason"], "stop")

@@ -190,6 +190,14 @@ def _group_summary(trades: list[dict[str, Any]], key: str) -> dict[str, Any]:
     return {name: summarize(items) for name, items in sorted(groups.items())}
 
 
+def _entry_scenario(signal: dict[str, Any]) -> dict[str, Any] | None:
+    """A waiting candidate means a zone order may be placed after this candle closes."""
+    scenario = signal.get("scenario")
+    if not isinstance(scenario, dict) or signal.get("status") not in {"候選做多", "候選做空"}:
+        return None
+    return scenario
+
+
 def run_backtest(
     archive_path: Path, *, fee_bps_per_side: Any, slippage_bps_per_side: Any,
     minimum_net_rr: Any, max_setup_age_hours: int = 168,
@@ -237,8 +245,8 @@ def run_backtest(
                 continue
             _asof_archive(asof_path, metadata, candles, raw_events, symbol, asof, candle["close"])
             signal = market_research.build_analysis(asof_path, config, now=datetime.fromtimestamp(asof / 1000, timezone.utc))
-            scenario = signal.get("scenario")
-            if not scenario or signal.get("execution_state") != "目前已觸發":
+            scenario = _entry_scenario(signal)
+            if scenario is None:
                 continue
             setup_id = scenario.get("entry_event_id", "")
             if setup_id in consumed_setups:
