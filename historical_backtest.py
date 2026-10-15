@@ -626,9 +626,7 @@ def _simulate_slice(
         elif pending:
             age_hours = (int(bar["open_time"]) - int(pending["setup_confirm_ms"])) / 3_600_000
             candidate_now = current_snapshot.get("candidate")
-            if (age_hours > max_setup_age_hours
-                    or not current_snapshot.get("integrity_ok")
-                    or (candidate_now and candidate_now.get("setup_id") != pending.get("setup_id"))):
+            if (age_hours > max_setup_age_hours or not current_snapshot.get("integrity_ok")):
                 pending = None
             else:
                 op = _number(bar["open"], "open", positive=True)
@@ -668,7 +666,8 @@ def _simulate_slice(
                             trades.append(_make_trade(position, raw_exit, int(bar["close_time"]) + 1,
                                                       reason, index, fee_bps, slippage_bps))
                             position = None
-                    elif not _candidate_allowed(candidate_now, minimum_net_rr, max_setup_age_hours):
+                    elif (not _candidate_allowed(candidate_now, minimum_net_rr, max_setup_age_hours)
+                          or candidate_now.get("setup_id") != pending.get("setup_id")):
                         pending = None
                     if pending and candidate_now and candidate_now.get("setup_id") == pending.get("setup_id"):
                         pending = dict(candidate_now)
