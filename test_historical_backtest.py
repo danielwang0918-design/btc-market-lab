@@ -137,7 +137,7 @@ class P0HistoryTests(unittest.TestCase):
             candle(0, open_=105, high=110, low=104, close=108),
             candle(1, open_=107, high=109, low=101, close=102),
             candle(2, open_=101, high=109, low=99, close=100),
-            candle(3, open_=100, high=121, low=95, close=115),
+            candle(3, open_=100, high=110, low=95, close=105),
         ]
         snapshots = [
             {"candidate": signal(0), "integrity_ok": True},
