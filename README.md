@@ -34,6 +34,23 @@ python3 binance_market_data.py BTCUSDT --limit 200 --output-dir data
 
 `--limit` 範圍為 1–1000。擷取器保留原始 K 線與 CSV/ZIP 欄位。
 
+## P0：歷史資料下載與回測
+
+長區間資料由 Binance 公開現貨 K 線端點分頁抓取；每次最多 1000 根，資料存在 `data/historical/`，按交易對與週期各存一個 CSV。第一次不指定起始日會從 BTC 現貨資料起始日 `2017-08-17` 開始；後續不指定 `--start` 時，會接在現有最後一根 K 線之後更新。指定 `--start` 可下載或補回指定區段，重複時間戳會合併為單一根，輸出按時間排序。日期按 UTC 解讀；`--end YYYY-MM-DD` 會包含該日。
+
+```bash
+python3 historical_backtest.py download BTCUSDT --interval 1h --start 2020-01-01 --end 2025-12-31
+python3 historical_backtest.py download BTCUSDT --interval 4h --start 2020-01-01
+python3 historical_backtest.py download BTCUSDT --interval 1d --start 2017-08-17
+python3 historical_backtest.py backtest BTCUSDT --fee-bps-per-side 10 --slippage-bps-per-side 5 --target-r 2
+```
+
+下載器沿用本專案 Binance client 的逾時、有限次重試與退避，並檢查 OHLCV、時間對齊與收盤狀態。回傳範圍內若有缺口，會保留 CSV 並在下載摘要列出；回測會拒絕含缺口的 1H 檔，避免假設缺漏期間沒有觸發停損。資料只納入已收盤 K 線。
+
+P0 回測策略版本為 `structure_break_with_order_block_v1`：只在 1H 已收盤結構突破與 OB 同時確認後產生訊號，下一根 1H 開盤進場，以 OB 外緣作停損，目標採固定 R。費率和滑價均按進出場每一側計入。若同一根 K 線同時觸及停損和目標，按停損先到處理；跨越資料切分邊界的持倉不會延伸到下一段，而在該段最後收盤平倉。資料依時間順序切成 train/validation/test（預設 60%/20%/20%），輸出各段交易數、勝率、平均盈虧、期望值 R、profit factor、最大回撤 R、連敗數，以及依方向和 setup 的統計。完整交易明細和切分界線寫入 JSON。
+
+這是供驗證資料和程式流程的基準回測，不表示策略有效；目前沒有參數搜尋、資金曲線倉位模型、點差/流動性模型或策略優化。預設每筆一單位作比較，績效仍可能受市場微結構及 OHLC 模擬限制影響。此功能只讀公開行情，不登入帳戶、不送出訂單。
+
 ## v1 分析規則與狀態
 
 策略規則完整寫在設定檔及程式版本 `mtf-bos-ob-retest-v1` 中：
@@ -127,3 +144,4 @@ python3 -m unittest -v
 - 每個週期最多請求 1000 根；資料長度以 API 實際回傳為準。缺口會被標記並分段分析；時間戳或排序不合法時，擷取會中止。程式不會虛構缺漏資料，也不會把正在形成的 K 線納入結構判定。
 - 合約資料僅為盡力擷取。現貨交易對可能沒有對應的 USDⓈ-M 合約；相關 CSV 可能只有欄名，失敗原因會記在 metadata。
 - 結構標籤與候選規則尚未經統計/績效驗證，不提供勝率或績效宣稱、投資建議、帳戶登入或真實下單功能。
+
