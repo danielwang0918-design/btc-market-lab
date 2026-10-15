@@ -623,6 +623,11 @@ def _simulate_slice(
                 trades.append(_make_trade(position, raw_exit, int(bar["close_time"]) + 1,
                                           reason, index, fee_bps, slippage_bps))
                 position = None
+            elif not current_snapshot.get("integrity_ok"):
+                trades.append(_make_trade(position, _number(bar["close"], "close", positive=True),
+                                          int(bar["close_time"]) + 1, "integrity_review_exit",
+                                          index, fee_bps, slippage_bps))
+                position = None
         elif pending:
             age_hours = (int(bar["open_time"]) - int(pending["setup_confirm_ms"])) / 3_600_000
             candidate_now = current_snapshot.get("candidate")
@@ -766,11 +771,17 @@ def tune_parameters(
                 "test_was_used_for_selection": False,
             })
     eligible = [row for row in candidates if row["eligible_for_selection"]]
-    ranked = sorted(eligible, key=lambda row: (
-        row["validation"]["expectancy_r"],
-        -1 if row["validation"]["profit_factor"] in (None, "infinite") else row["validation"]["profit_factor"],
-        row["validation"]["trade_count"],
-    ), reverse=True)
+    def validation_rank(row: dict[str, Any]) -> tuple[float, float, int]:
+        profit_factor = row["validation"]["profit_factor"]
+        if profit_factor == "infinite":
+            pf_score = math.inf
+        elif profit_factor is None:
+            pf_score = -1.0
+        else:
+            pf_score = float(profit_factor)
+        return (float(row["validation"]["expectancy_r"]), pf_score, int(row["validation"]["trade_count"]))
+
+    ranked = sorted(eligible, key=validation_rank, reverse=True)
     selected = ranked[0] if ranked else None
     if selected is None:
         default_row = next((row for row in candidates if row["minimum_net_rr"] == 1.5 and row["max_setup_age_hours"] == 168), None)
@@ -847,8 +858,8 @@ def main(argv: list[str] | None = None) -> int:
     tune.add_argument("--output", type=Path)
 
     args = parser.parse_args(argv)
-    symbol = validate_symbol(args.symbol)
     try:
+        symbol = validate_symbol(args.symbol)
         if args.command in {"download", "download-all"}:
             intervals = INTERVALS if args.command == "download-all" else (args.interval,)
             results = []
