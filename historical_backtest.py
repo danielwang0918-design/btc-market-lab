@@ -776,7 +776,7 @@ def tune_parameters(
             candidates.append({
                 "minimum_net_rr": rr, "max_setup_age_hours": age,
                 "train": result["splits"]["train"]["metrics"],
-                "validation": validation, "test": result["splits"]["test"]["metrics"],
+                "validation": validation,
                 "eligible_for_selection": validation["trade_count"] >= minimum_validation_trades,
                 "test_was_used_for_selection": False,
             })
