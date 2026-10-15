@@ -14,11 +14,11 @@ from pathlib import Path
 from typing import Any
 
 from binance_market_data import BinanceAPIError, BinanceClient, SPOT_BASE, validate_symbol
-from market_structure import INTERVAL_MILLISECONDS, analyze_candles, inspect_candle_integrity
+from market_structure import INTERVAL_MILLISECONDS, inspect_candle_integrity
 
 DEFAULT_START = "2017-08-17"
 INTERVALS = ("1d", "4h", "1h")
-COLUMNS = ["symbol", "interval", "open_time", "open_time_utc", "open", "high", "low", "close", "volume", "close_time", "close_time_utc", "is_closed", "source"]
+COLUMNS = ["symbol", "interval", "open_time", "open_time_utc", "open", "high", "low", "close", "volume", "close_time", "close_time_utc", "exchange_close_time", "exchange_close_time_utc", "is_closed", "source"]
 SOURCE = "Binance Spot REST API historical klines"
 
 
@@ -66,8 +66,9 @@ def _parse_page(raw: Any, symbol: str, interval: str, server_time: int) -> list[
             raise BinanceAPIError("K 線含有無效時間或數值。") from exc
         if open_time <= previous:
             raise BinanceAPIError("Binance 分頁內的 K 線重複或未按時間排序。")
-        if open_time % step or close_time != open_time + step - 1:
-            raise BinanceAPIError("K 線時間戳未對齊週期，或 close_time 不符週期長度。")
+        scheduled_close = open_time + step - 1
+        if open_time % step or not open_time <= close_time <= scheduled_close:
+            raise BinanceAPIError("K 線時間戳未對齊週期，或交易所 close_time 超出該根 K 線時段。")
         if not all(math.isfinite(x) for x in (o, h, low, c, volume)) or min(o, h, low, c) <= 0 or volume < 0 or low > min(o, c) or h < max(o, c) or low > h:
             raise BinanceAPIError("K 線 OHLCV 完整性檢查失敗。")
         if open_time > server_time:
@@ -75,8 +76,12 @@ def _parse_page(raw: Any, symbol: str, interval: str, server_time: int) -> list[
         result.append({"symbol": symbol, "interval": interval, "open_time": open_time,
                        "open_time_utc": _utc(open_time), "open": str(item[1]), "high": str(item[2]),
                        "low": str(item[3]), "close": str(item[4]), "volume": str(item[5]),
-                       "close_time": close_time, "close_time_utc": _utc(close_time),
-                       "is_closed": str(close_time < server_time).lower(), "source": SOURCE})
+                       # Binance may timestamp the last trade rather than the scheduled
+                       # interval boundary. Preserve it, and use a canonical boundary for
+                       # continuity checks and closed-candle decisions.
+                       "close_time": scheduled_close, "close_time_utc": _utc(scheduled_close),
+                       "exchange_close_time": close_time, "exchange_close_time_utc": _utc(close_time),
+                       "is_closed": str(scheduled_close < server_time).lower(), "source": SOURCE})
         previous = open_time
     return result
 
@@ -170,6 +175,7 @@ def download_to_csv(
     save_csv(path, rows)
     return {"path": str(path), "symbol": symbol, "interval": interval,
             "downloaded_count": len(fetched), "total_count": len(rows),
+            "normalized_exchange_close_time_count": sum(int(row.get("exchange_close_time", row["close_time"])) != int(row["close_time"]) for row in fetched),
             "data_integrity": report, "requested_start_utc": _utc(start_ms),
             "requested_end_exclusive_utc": _utc(end_ms)}
 
@@ -287,6 +293,70 @@ def _simulate_segment(rows: list[dict[str, Any]], events: list[dict[str, Any]], 
     return trades
 
 
+def _p0_events(rows: list[dict[str, Any]], *, left_bars: int = 2, right_bars: int = 2, ob_lookback: int = 10) -> list[dict[str, Any]]:
+    """Stream only the BOS/OB evidence needed by P0, without hindsight or quadratic labels."""
+    if not rows:
+        return []
+    events: list[dict[str, Any]] = []
+    latest_high: tuple[int, int, float] | None = None
+    latest_low: tuple[int, int, float] | None = None
+    broken_highs: set[int] = set()
+    broken_lows: set[int] = set()
+    for index, candle in enumerate(rows):
+        pivot = index - right_bars
+        if pivot >= left_bars:
+            window = rows[pivot - left_bars:index + 1]
+            pivot_high = float(rows[pivot]["high"])
+            pivot_low = float(rows[pivot]["low"])
+            if all(pivot_high > float(item["high"]) for j, item in enumerate(window) if j != left_bars):
+                latest_high = (pivot, index, pivot_high)
+            if all(pivot_low < float(item["low"]) for j, item in enumerate(window) if j != left_bars):
+                latest_low = (pivot, index, pivot_low)
+        close = float(candle["close"])
+        candidates: list[tuple[str, tuple[int, int, float]]] = []
+        if latest_high and latest_high[0] not in broken_highs and index > latest_high[1] and close > latest_high[2]:
+            candidates.append(("bullish", latest_high))
+        if latest_low and latest_low[0] not in broken_lows and index > latest_low[1] and close < latest_low[2]:
+            candidates.append(("bearish", latest_low))
+        for direction, (pivot_idx, confirmed_idx, level) in candidates:
+            if direction == "bullish":
+                broken_highs.add(pivot_idx)
+            else:
+                broken_lows.add(pivot_idx)
+            confirmed_close = int(candle["close_time"])
+            event_id = f"{candle['symbol']}:1h:structure_break:{direction}:{candle['open_time']}"
+            events.append({"event_type": "structure_break", "direction": direction,
+                           "confirmed_at_close_time": confirmed_close, "event_id": event_id})
+            start = max(confirmed_idx, index - ob_lookback)
+            opposing = next((j for j in range(index - 1, start - 1, -1)
+                             if (float(rows[j]["close"]) < float(rows[j]["open"]) if direction == "bullish"
+                                 else float(rows[j]["close"]) > float(rows[j]["open"]))), None)
+            if opposing is not None:
+                ob = rows[opposing]
+                events.append({"event_type": "order_block", "direction": direction,
+                               "confirmed_at_close_time": confirmed_close,
+                               "price_low": str(ob["low"]), "price_high": str(ob["high"]),
+                               "event_id": f"{event_id}:ob"})
+    return events
+
+
+def _contiguous_segments(rows: list[dict[str, Any]], interval: str = "1h") -> list[list[dict[str, Any]]]:
+    step = INTERVAL_MILLISECONDS[interval]
+    result: list[list[dict[str, Any]]] = []
+    current: list[dict[str, Any]] = []
+    previous = None
+    for row in rows:
+        opened = int(row["open_time"])
+        if previous is not None and opened - previous != step:
+            result.append(current)
+            current = []
+        current.append(row)
+        previous = opened
+    if current:
+        result.append(current)
+    return result
+
+
 def _metrics(trades: list[dict[str, Any]]) -> dict[str, Any]:
     count = len(trades)
     wins = [t for t in trades if t["net_pnl_per_unit"] > 0]
@@ -320,9 +390,6 @@ def run_backtest(path: Path, symbol: str, *, fee_bps: float = 10.0, slippage_bps
         raise ValueError("成本、目標 R 與資料切分比例設定無效。")
     rows = _closed_rows(path, validate_symbol(symbol), "1h")
     integrity = inspect_candle_integrity(rows, "1h")
-    if integrity["gaps"]:
-        raise ValueError(f"回測資料有 {integrity['missing_candle_count']} 根缺漏 K 線；請補齊資料後再執行，以免持倉跨過未知行情。")
-    events = analyze_candles(rows)
     n = len(rows)
     cut1, cut2 = int(n * train_fraction), int(n * (train_fraction + validation_fraction))
     bounds = {"train": (0, cut1), "validation": (cut1, cut2), "test": (cut2, n)}
@@ -332,8 +399,10 @@ def run_backtest(path: Path, symbol: str, *, fee_bps: float = 10.0, slippage_bps
         segment = rows[start:end]
         start_ms = int(segment[0]["open_time"]) if segment else None
         end_ms = int(segment[-1]["close_time"]) if segment else None
-        segment_events = [event for event in events if start_ms is not None and start_ms <= int(event["confirmed_at_close_time"]) < int(segment[-1]["close_time"])]
-        trades = _simulate_segment(segment, segment_events, fee_bps, slippage_bps, target_r)
+        trades: list[dict[str, Any]] = []
+        for contiguous in _contiguous_segments(segment):
+            segment_events = _p0_events(contiguous)
+            trades.extend(_simulate_segment(contiguous, segment_events, fee_bps, slippage_bps, target_r))
         results[name] = {"period_start_utc": _utc(start_ms) if start_ms is not None else None,
                          "period_end_utc": _utc(end_ms) if end_ms is not None else None,
                          "metrics": _metrics(trades)}
@@ -352,6 +421,7 @@ def run_backtest(path: Path, symbol: str, *, fee_bps: float = 10.0, slippage_bps
                              "test_fraction": 1 - train_fraction - validation_fraction,
                              "boundaries": {"train_end_index": cut1, "validation_end_index": cut2, "candle_count": n}},
             "periods": results, "by_direction": breakdown("direction"), "by_setup": breakdown("setup"),
+            "gap_handling": "每個 train/validation/test 段內再按連續 K 線切分；市場結構與持倉不跨越缺口。",
             "trades_detail": all_trades, "data_integrity": integrity}
 
 
