@@ -429,7 +429,7 @@ def build_analysis_from_records(
     if not symbol:
         raise ValueError("metadata.json 缺少交易對。")
     sources = metadata.get("sources")
-    if not isinstance(sources, dict) or sources.get("spot") != binance_market_data.SPOT_BASE:
+    if not isinstance(sources, dict) or sources.get("spot") not in {binance_market_data.SPOT_BASE, binance_market_data.SPOT_PUBLIC_DATA_BASE}:
         raise ValueError("metadata.json 未確認 Binance 官方現貨 REST API 資料來源。")
     server_time_value = metadata.get("binance_server_time")
     if type(server_time_value) is not int or server_time_value < 0:
