@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 
 import historical_backtest as backtest
+import market_structure
 from market_structure import INTERVAL_MILLISECONDS
 
 
@@ -36,6 +37,16 @@ def candle(open_time, o, h, low, c):
 
 
 class HistoricalBacktestTests(unittest.TestCase):
+    def test_exchange_last_trade_time_is_preserved_and_canonical_close_is_used(self):
+        step = INTERVAL_MILLISECONDS["1h"]
+        start = 1_700_000_000_000 // step * step
+        raw = raw_bar(start)
+        raw[6] = start + 1234
+        rows = backtest.fetch_historical_candles("BTCUSDT", "1h", start, start + step,
+                                                 PagedClient(start, [raw]))
+        self.assertEqual(rows[0]["exchange_close_time"], start + 1234)
+        self.assertEqual(rows[0]["close_time"], start + step - 1)
+
     def test_download_paginates_with_maximum_and_returns_sorted_closed_rows(self):
         step = INTERVAL_MILLISECONDS["1h"]
         start = 1_700_000_000_000 // step * step
@@ -79,6 +90,31 @@ class HistoricalBacktestTests(unittest.TestCase):
         self.assertEqual(len(trades), 1)
         self.assertEqual(trades[0]["exit_reason"], "stop")
         self.assertLess(trades[0]["r_multiple"], 0)
+
+    def test_streaming_p0_events_match_closed_candle_structure_break_and_ob(self):
+        step = INTERVAL_MILLISECONDS["1h"]
+        start = 1_700_000_000_000 // step * step
+        rows = [
+            candle(start + 0 * step, 9, 10, 8, 9),
+            candle(start + 1 * step, 10, 11, 8, 10.5),
+            candle(start + 2 * step, 11, 12, 9, 11.5),
+            candle(start + 3 * step, 10, 11, 8, 9),
+            candle(start + 4 * step, 10, 10, 9, 9.5),
+            candle(start + 5 * step, 12, 14, 9, 13),
+        ]
+        expected = market_structure.analyze_candles(rows)
+        expected = [event for event in expected if event["event_type"] in {"structure_break", "order_block"}]
+        actual = backtest._p0_events(rows)
+        actual_summary = sorted((event["event_type"], event["direction"], event["confirmed_at_close_time"]) for event in actual)
+        expected_summary = sorted((event["event_type"], event["direction"], int(event["confirmed_at_close_time"])) for event in expected)
+        self.assertEqual(actual_summary, expected_summary)
+
+    def test_gap_segments_do_not_connect_or_carry_positions(self):
+        step = INTERVAL_MILLISECONDS["1h"]
+        start = 1_700_000_000_000 // step * step
+        rows = [candle(start, 100, 102, 99, 101), candle(start + 3 * step, 101, 103, 100, 102)]
+        segments = backtest._contiguous_segments(rows)
+        self.assertEqual([len(segment) for segment in segments], [1, 1])
 
     def test_metrics_cover_expectancy_drawdown_and_loss_streak(self):
         trades = [
