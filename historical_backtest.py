@@ -185,6 +185,30 @@ def download_to_csv(
 
 
 
+def _contiguous_segments(rows: list[dict[str, Any]], interval: str) -> list[list[dict[str, Any]]]:
+    step = INTERVAL_MILLISECONDS[interval]
+    segments: list[list[dict[str, Any]]] = []
+    current: list[dict[str, Any]] = []
+    previous: int | None = None
+    for row in rows:
+        opened = int(row["open_time"])
+        if previous is not None and opened - previous != step:
+            if current:
+                segments.append(current)
+            current = []
+        current.append(row)
+        previous = opened
+    if current:
+        segments.append(current)
+    return segments
+
+
+def _json_default(value: Any) -> Any:
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    raise TypeError(f"無法序列化 {type(value).__name__}")
+
+
 def _number(value: Any, label: str, *, positive: bool = False, nonnegative: bool = False) -> Decimal:
     from decimal import Decimal, InvalidOperation
     try:
@@ -206,7 +230,7 @@ def _closed_rows(path: Path, symbol: str, interval: str) -> list[dict[str, Any]]
         raise ValueError(f"{path} K 線時間戳錯誤：{report['errors'][0]['kind']}。")
     for row in rows:
         for field in ("open_time", "close_time"):
-            row[field] = int(row[field])
+            int(row[field])
         for field in ("open", "high", "low", "close", "volume"):
             value = _number(row.get(field), f"K 線 {field}", nonnegative=(field == "volume"), positive=(field != "volume"))
             row[field] = format(value, "f")
