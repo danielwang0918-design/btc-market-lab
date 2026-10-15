@@ -234,9 +234,9 @@ def _closed_rows(path: Path, symbol: str, interval: str) -> list[dict[str, Any]]
         for field in ("open", "high", "low", "close", "volume"):
             value = _number(row.get(field), f"K 線 {field}", nonnegative=(field == "volume"), positive=(field != "volume"))
             row[field] = format(value, "f")
-        if row["low"] > min(_number(row["open"], "open"), _number(row["close"], "close")):
+        if _number(row["low"], "low", positive=True) > min(_number(row["open"], "open", positive=True), _number(row["close"], "close", positive=True)):
             raise ValueError(f"{path} 的 K 線 low 高於 open/close。")
-        if row["high"] < max(_number(row["open"], "open"), _number(row["close"], "close")):
+        if _number(row["high"], "high", positive=True) < max(_number(row["open"], "open", positive=True), _number(row["close"], "close", positive=True)):
             raise ValueError(f"{path} 的 K 線 high 低於 open/close。")
         if row.get("source") != SOURCE_SPOT:
             raise ValueError(f"{path} 存在非預期的資料來源欄位。")
