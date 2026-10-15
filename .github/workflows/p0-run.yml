@@ -1,0 +1,58 @@
+name: P0 real-market backtest
+
+on:
+  push:
+    branches:
+      - codex/p0-integrated-mtf-backtest
+    paths:
+      - .github/workflows/p0-run.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: p0-real-market-backtest
+  cancel-in-progress: false
+
+jobs:
+  historical-backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Download complete available BTCUSDT history
+        run: python historical_backtest.py download-all BTCUSDT
+      - name: Run baseline with frozen parameters
+        run: >
+          python historical_backtest.py backtest BTCUSDT
+          --fee-bps-per-side 10
+          --slippage-bps-per-side 5
+          --minimum-net-rr 1.5
+          --max-setup-age-hours 168
+      - name: Select parameters using validation only and test once
+        run: >
+          python historical_backtest.py tune BTCUSDT
+          --rr-grid 1.25,1.5,1.75,2.0
+          --age-grid 72,168,240
+          --fee-bps-per-side 10
+          --slippage-bps-per-side 5
+          --minimum-validation-trades 20
+      - name: Upload history and backtest reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: btc-market-lab-p0-\${{ github.run_id }}
+          path: |
+            data/historical/BTCUSDT_1d.csv
+            data/historical/BTCUSDT_4h.csv
+            data/historical/BTCUSDT_1h.csv
+            data/historical/BTCUSDT_mtf_backtest.json
+            data/historical/BTCUSDT_mtf_tuning.json
+          if-no-files-found: warn
+          retention-days: 14
