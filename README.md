@@ -83,6 +83,25 @@ python3 derivatives_research.py analyze BTCUSDT --period 1h --interval 1h
 
 Binance 公開 OI 統計、多空比及 taker 歷史統計目前只提供最近 30 天，且每次最多 500 筆；資金費率歷史另由其端點分頁下載。若要求區間早於保留期，metadata 會記錄實際可請求的起點，而不會補造資料。不同資料序列的 coverage 會各自寫入 `BTCUSDT_derivatives_metadata.json`。
 
+### P2：總經與政策事件風險提醒
+
+先同步 BLS 官方發布行事曆（含 CPI、Employment Situation 非農就業報告）、Fed 官方 FOMC 會議日期，以及 Fed/SEC 官方 RSS 標題：
+
+```bash
+python3 event_risk.py sync
+python3 event_risk.py show
+```
+
+排程與已人工核對的事件存在 `.market-lab/events/calendar.json`。官方 RSS 標題只進入 `review_required` 清單，不會由程式推測 BTC 影響範圍或漲跌方向；確認重大政策或 BTC 事件後，可用 `add` 明確登錄時間、官方來源、影響範圍和嚴重程度：
+
+```bash
+python3 event_risk.py add --title "政策公告" --category policy --time 2026-10-15T12:30:00Z --source-name "Official agency" --source-url https://agency.gov/news --scope BTCUSDT global_markets --severity critical
+```
+
+`market_research.py` 分析時自動讀取此行事曆，亦可用 `--event-calendar` 指定其他檔案。透明的預設規則是：CPI、非農和 FOMC 利率決議列為重大事件；事件前 60 分鐘至後 30 分鐘暫停候選情境，事件前 24 小時內則要求重新評估。行事曆超過 48 小時未同步或不存在時，報告會明確標示未知並要求人工確認；不存在/過期本身不會假裝成「沒有事件」。這些時間窗是保守的操作護欄，尚未以歷史績效最佳化。FOMC 預定決議時間依 Fed 月曆標準化為美東時間 14:00，執行前仍須回看最新官方月曆。
+
+官方來源：[BLS 發布行事曆](https://www.bls.gov/schedule/news_release/bls.ics)、[Fed FOMC 會議行事曆](https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm)、[Fed RSS 清單](https://www.federalreserve.gov/feeds/feeds.htm)、[SEC RSS 清單](https://www.sec.gov/files/about/secrss.shtml)。BLS 行事曆涵蓋多數近期新聞發布且會更新；FOMC 日期來自 Fed 會議行事曆。RSS 不是完整的突發事件偵測器，重大加密產業事件仍需人工從可信來源登錄。本功能只降低信心或暫停情境，不做新聞情緒分析、價格方向預測或自動下單。
+
 清算事件可從開始記錄時起保存：
 
 ```bash
