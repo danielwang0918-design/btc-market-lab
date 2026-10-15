@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 import binance_market_data
+import event_risk
 from market_structure import inspect_candle_integrity
 
 INTERVALS = ("1d", "4h", "1h")
@@ -27,6 +28,7 @@ CONFIG_VERSION = 1
 DEFAULT_CONFIG = Path(".market-lab/strategy.json")
 DEFAULT_DATA_DIR = Path("data")
 DEFAULT_RECORDS_DIR = Path("research")
+DEFAULT_EVENT_CALENDAR = Path(".market-lab/events/calendar.json")
 ANALYSIS_REQUIRED_MEMBERS = {"metadata.json", "klines.csv", "spot_price.csv", "market_structure.csv"}
 KNOWN_QUOTES = ("USDT", "USDC", "FDUSD", "BUSD", "BTC", "ETH", "BNB", "TRY")
 
@@ -412,7 +414,10 @@ def _net_risk_reward(side: str, entry: Decimal, stop: Decimal, target: Decimal, 
     }
 
 
-def build_analysis(archive_path: Path, config: dict[str, Any], *, now: datetime | None = None) -> dict[str, Any]:
+def build_analysis(
+    archive_path: Path, config: dict[str, Any], *, now: datetime | None = None,
+    event_calendar_path: Path = DEFAULT_EVENT_CALENDAR,
+) -> dict[str, Any]:
     config = validate_config(config)
     report_now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
     metadata, candles, spots, raw_events = _load_archive(archive_path)
@@ -427,6 +432,8 @@ def build_analysis(archive_path: Path, config: dict[str, Any], *, now: datetime 
         raise ValueError("metadata.json 缺少有效 Binance server time。")
     server_time = server_time_value
     archive_hash = hashlib.sha256(archive_path.read_bytes()).hexdigest()
+    calendar = event_risk.load_calendar(event_calendar_path)
+    event_assessment = event_risk.evaluate_event_risk(calendar, report_now, symbol=symbol)
     integrity = _integrity_reports(candles, metadata, symbol, server_time)
     latest_candles: dict[str, dict[str, Any]] = {}
     candle_errors: list[str] = []
@@ -475,6 +482,7 @@ def build_analysis(archive_path: Path, config: dict[str, Any], *, now: datetime 
             "quote_freshness": quote_check,
             "multi_timeframe_structure": {"status": "insufficient_data", "latest_confirmed_structure_breaks": structure_summary},
             "event_evidence": {"accepted_event_count": len(valid_events), "rejected_event_count": len(rejected_events), "rejected_events": rejected_events},
+            "event_risk": event_assessment,
         },
         "scenario": None,
         "evidence": {"structure_breaks": structure_summary, "setup_order_block": None, "target_swing": None, "context_events": []},
@@ -482,12 +490,15 @@ def build_analysis(archive_path: Path, config: dict[str, Any], *, now: datetime 
             "這是依設定規則產生的研究情境，不是保證、個人化投資建議或成交確認。",
             "現價進入 OB 區只代表價格條件被觸及；未檢查委託簿、流動性、成交機率或盤中路徑。",
             "固定使用結構突破、OB 回踩及波段目標規則；OB/FVG/2B 定義是程式化慣例，尚未做績效或勝率驗證。",
+            "宏觀/政策事件評估僅根據本機事件行事曆；突發新聞可能尚未收錄。RSS 標題不會自動判斷方向或影響。",
         ],
     }
 
     def no_trade(reason: str) -> dict[str, Any]:
         if reason not in outcome["reasons"]:
             outcome["reasons"].append(reason)
+        if event_assessment["candidate_action"] == "no_trade" and event_assessment["message"] not in outcome["reasons"]:
+            outcome["reasons"].append(event_assessment["message"])
         return outcome
 
     if any(not report.get("integrity_ok") for report in integrity.values()):
@@ -611,6 +622,15 @@ def build_analysis(archive_path: Path, config: dict[str, Any], *, now: datetime 
         "target_event_id": target_event.get("event_id", ""),
     }
     outcome["reasons"].append("所有已設定檢核均通過；觸發狀態只依新鮮現貨報價是否位於 OB 區間判定。")
+    if event_assessment["candidate_action"] == "no_trade":
+        outcome["status"] = "不適合開單"
+        outcome["execution_state"] = "事件風險暫停"
+        outcome["reasons"].append(event_assessment["message"])
+    elif event_assessment["candidate_action"] == "reassess":
+        outcome["execution_state"] = "事件前重新評估"
+        outcome["reasons"].append(event_assessment["message"])
+    elif event_assessment["candidate_action"] == "manual_review":
+        outcome["reasons"].append(event_assessment["message"])
     return outcome
 
 
@@ -708,6 +728,8 @@ def print_summary(report: dict[str, Any], output_fn: Callable[[str], None] = pri
     quote = report["checks"]["quote_freshness"]
     quote_text = f"{quote.get('price', '無資料')}（{quote.get('status')}，{quote.get('captured_at_utc', '無時間戳')}）"
     output_fn(f"資料完整性：{integrity_text}；現貨報價：{quote_text}")
+    event_risk_check = report.get("checks", {}).get("event_risk", {})
+    output_fn(f"總經／政策事件：{event_risk_check.get('status', 'unknown')}；{event_risk_check.get('message', '尚未檢查')}")
     for interval, event in report["evidence"]["structure_breaks"].items():
         if event.get("event_id"):
             output_fn(f"{interval} 結構突破：{event.get('direction')}，確認時間 {event.get('confirmed_at_utc')}，事件 {event.get('event_id')}")
@@ -730,6 +752,7 @@ def _analyze_main(argv: list[str]) -> int:
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     parser.add_argument("--data-dir", type=Path, default=DEFAULT_DATA_DIR)
     parser.add_argument("--records-dir", type=Path, default=DEFAULT_RECORDS_DIR)
+    parser.add_argument("--event-calendar", type=Path, default=DEFAULT_EVENT_CALENDAR, help="P2 官方事件行事曆 JSON")
     args = parser.parse_args(argv)
     if args.setup:
         configure(args.config)
@@ -748,7 +771,7 @@ def _analyze_main(argv: list[str]) -> int:
         parser.error("設定完成後請輸入幣種，例如 BTC。")
     symbol = normalize_symbol(args.symbol)
     archive = binance_market_data.fetch_market_data(symbol, args.data_dir)
-    report = build_analysis(archive, config)
+    report = build_analysis(archive, config, event_calendar_path=args.event_calendar)
     path = save_analysis(report, args.records_dir)
     print_summary(report)
     print(f"分析紀錄已儲存：{path}")
@@ -803,3 +826,4 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
