@@ -412,10 +412,19 @@ def _net_risk_reward(side: str, entry: Decimal, stop: Decimal, target: Decimal, 
     }
 
 
-def build_analysis(archive_path: Path, config: dict[str, Any], *, now: datetime | None = None) -> dict[str, Any]:
+def build_analysis_from_records(
+    metadata: dict[str, Any],
+    candles: list[dict[str, str]],
+    spots: list[dict[str, str]],
+    raw_events: list[dict[str, str]],
+    config: dict[str, Any],
+    *,
+    archive_name: str = "in-memory-snapshot",
+    archive_sha256: str = "",
+    now: datetime | None = None,
+) -> dict[str, Any]:
     config = validate_config(config)
     report_now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
-    metadata, candles, spots, raw_events = _load_archive(archive_path)
     symbol = str(metadata.get("symbol", "")).upper()
     if not symbol:
         raise ValueError("metadata.json 缺少交易對。")
@@ -426,7 +435,7 @@ def build_analysis(archive_path: Path, config: dict[str, Any], *, now: datetime 
     if type(server_time_value) is not int or server_time_value < 0:
         raise ValueError("metadata.json 缺少有效 Binance server time。")
     server_time = server_time_value
-    archive_hash = hashlib.sha256(archive_path.read_bytes()).hexdigest()
+    archive_hash = archive_sha256
     integrity = _integrity_reports(candles, metadata, symbol, server_time)
     latest_candles: dict[str, dict[str, Any]] = {}
     candle_errors: list[str] = []
@@ -463,7 +472,7 @@ def build_analysis(archive_path: Path, config: dict[str, Any], *, now: datetime 
         "analysis_id": "",
         "generated_at_utc": report_now.isoformat(),
         "symbol": symbol,
-        "source": {"name": "Binance public REST API", "archive": archive_path.name, "archive_sha256": archive_hash},
+        "source": {"name": "Binance public REST API", "archive": archive_name, "archive_sha256": archive_hash},
         "strategy_version": config["strategy_version"],
         "configuration": {key: config[key] for key in ("minimum_net_rr", "max_quote_age_seconds", "fee_bps_per_side", "slippage_bps_per_side", "max_setup_age_hours", "rules")},
         "status": "不適合開單",
@@ -613,6 +622,16 @@ def build_analysis(archive_path: Path, config: dict[str, Any], *, now: datetime 
     outcome["reasons"].append("所有已設定檢核均通過；觸發狀態只依新鮮現貨報價是否位於 OB 區間判定。")
     return outcome
 
+
+
+def build_analysis(archive_path: Path, config: dict[str, Any], *, now: datetime | None = None) -> dict[str, Any]:
+    """Build a rule-based analysis from a saved ZIP, preserving its byte-level audit hash."""
+    metadata, candles, spots, raw_events = _load_archive(archive_path)
+    archive_hash = hashlib.sha256(archive_path.read_bytes()).hexdigest()
+    return build_analysis_from_records(
+        metadata, candles, spots, raw_events, config,
+        archive_name=archive_path.name, archive_sha256=archive_hash, now=now,
+    )
 
 def save_analysis(report: dict[str, Any], records_dir: Path) -> Path:
     stamp = datetime.fromisoformat(report["generated_at_utc"]).astimezone(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
