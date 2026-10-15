@@ -113,6 +113,27 @@ class P0HistoryTests(unittest.TestCase):
         self.assertGreater(float(trades[0]["fees_paid_per_unit"]), 0)
         self.assertGreater(float(trades[0]["r_multiple"]), 0)
 
+    def test_open_position_exits_when_integrity_window_fails(self):
+        rows = [
+            candle(0, open_=105, high=110, low=104, close=108),
+            candle(1, open_=107, high=109, low=99, close=101),
+            candle(2, open_=101, high=109, low=95, close=102),
+            candle(3, open_=102, high=110, low=96, close=103),
+        ]
+        snapshots = [
+            {"candidate": signal(0), "integrity_ok": True},
+            {"candidate": None, "integrity_ok": True},
+            {"candidate": None, "integrity_ok": False},
+            {"candidate": None, "integrity_ok": True},
+        ]
+        trades = hb._simulate_slice(
+            rows, snapshots, 0, len(rows), minimum_net_rr=1.5, max_setup_age_hours=168,
+            fee_bps=hb.Decimal("10"), slippage_bps=hb.Decimal("5"),
+        )
+        self.assertEqual(len(trades), 1)
+        self.assertEqual(trades[0]["exit_reason"], "integrity_review_exit")
+        self.assertEqual(trades[0]["exit_time_utc"], hb._utc(int(rows[2]["close_time"]) + 1))
+
     def test_same_bar_stop_and_target_resolves_to_stop(self):
         rows = [
             candle(0, open_=105, high=110, low=104, close=108),
