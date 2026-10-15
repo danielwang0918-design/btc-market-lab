@@ -168,6 +168,29 @@ class P0HistoryTests(unittest.TestCase):
         self.assertEqual(report["selected_parameters"], {"minimum_net_rr": 1.5, "max_setup_age_hours": 168})
         self.assertTrue(all(not row["test_was_used_for_selection"] for row in report["candidates"]))
 
+    def test_end_to_end_snapshot_engine_uses_three_closed_timeframes(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            data_dir = Path(temporary)
+            for interval, count in (("1d", 20), ("4h", 120), ("1h", 480)):
+                rows = []
+                for i in range(count):
+                    close = 100 + ((i % 12) - 6) * 0.7
+                    open_ = close + (0.25 if i % 2 else -0.25)
+                    rows.append(candle(
+                        i, open_=open_, high=max(open_, close) + 0.8,
+                        low=min(open_, close) - 0.8, close=close, interval=interval,
+                    ))
+                hb.save_csv(data_dir / f"BTCUSDT_{interval}.csv", rows)
+            rows_1h, snapshots, summary = hb._prepare_snapshots(
+                data_dir, "BTCUSDT", fee_bps_per_side=10, slippage_bps_per_side=5,
+                minimum_net_rr=1.25, max_setup_age_hours=240, progress_every=0,
+            )
+            self.assertEqual(len(rows_1h), 480)
+            self.assertEqual(len(snapshots), 480)
+            self.assertEqual(summary["strategy"], "mtf-bos-ob-retest-v1")
+            self.assertTrue(snapshots[-1]["integrity_ok"])
+            self.assertTrue(all("candidate" in item for item in snapshots))
+
     def test_historical_integrity_keeps_gaps_explicit(self):
         rows = [
             candle(0, open_=100, high=101, low=99, close=100),
