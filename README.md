@@ -100,7 +100,7 @@ python3 event_risk.py add --title "政策公告" --category policy --time 2026-1
 
 `market_research.py` 分析時自動讀取此行事曆，亦可用 `--event-calendar` 指定其他檔案。透明的預設規則是：CPI、非農和 FOMC 利率決議列為重大事件；事件前 60 分鐘至後 30 分鐘暫停候選情境，事件前 24 小時內則要求重新評估。行事曆超過 48 小時未同步或不存在時，報告會明確標示未知並要求人工確認；不存在/過期本身不會假裝成「沒有事件」。這些時間窗是保守的操作護欄，尚未以歷史績效最佳化。FOMC 預定決議時間依 Fed 月曆標準化為美東時間 14:00，執行前仍須回看最新官方月曆。
 
-官方來源：[BLS 發布行事曆](https://www.bls.gov/schedule/news_release/bls.ics)、[Fed FOMC 會議行事曆](https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm)、[Fed RSS 清單](https://www.federalreserve.gov/feeds/feeds.htm)、[SEC RSS 清單](https://www.sec.gov/files/about/secrss.shtml)。BLS 行事曆涵蓋多數近期新聞發布且會更新；FOMC 日期來自 Fed 會議行事曆。RSS 不是完整的突發事件偵測器，重大加密產業事件仍需人工從可信來源登錄。本功能只降低信心或暫停情境，不做新聞情緒分析、價格方向預測或自動下單。
+官方來源：[BLS 發布行事曆](https://www.bls.gov/schedule/news_release/bls.ics)、[Fed FOMC 會議行事曆](https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm)、[Fed RSS 清單](https://www.federalreserve.gov/feeds/feeds.htm)、[SEC RSS 清單](https://www.sec.gov/about/rss-feeds)。BLS 行事曆涵蓋多數近期新聞發布且會更新；FOMC 日期來自 Fed 會議行事曆。RSS 不是完整的突發事件偵測器，重大加密產業事件仍需人工從可信來源登錄。本功能只降低信心或暫停情境，不做新聞情緒分析、價格方向預測或自動下單。
 
 清算事件可從開始記錄時起保存：
 
