@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from binance_market_data import BinanceAPIError, BinanceClient, SPOT_BASE, SOURCE_SPOT, validate_symbol
+from binance_market_data import BinanceAPIError, BinanceClient, SPOT_PUBLIC_DATA_BASE, SOURCE_SPOT, validate_symbol
 from market_structure import INTERVAL_MILLISECONDS, inspect_candle_integrity, _event, DETECTOR_VERSION
 from decimal import Decimal
 import bisect
@@ -47,7 +47,7 @@ def _utc(ms: int) -> str:
 
 
 def _server_time(client: BinanceClient) -> int:
-    response = client.get_json(SPOT_BASE, "/api/v3/time")
+    response = client.get_json(SPOT_PUBLIC_DATA_BASE, "/api/v3/time")
     if not isinstance(response, dict) or type(response.get("serverTime")) is not int:
         raise BinanceAPIError("Binance server time 回應格式錯誤。")
     return response["serverTime"]
@@ -108,7 +108,7 @@ def fetch_historical_candles(
     server_time = _server_time(client)
     dedup: dict[int, dict[str, Any]] = {}
     while cursor < exclusive_end and cursor < server_time:
-        page = client.get_json(SPOT_BASE, "/api/v3/klines", {
+        page = client.get_json(SPOT_PUBLIC_DATA_BASE, "/api/v3/klines", {
             "symbol": symbol, "interval": interval, "startTime": cursor,
             "endTime": min(exclusive_end - 1, server_time), "limit": page_limit,
         })
@@ -431,7 +431,7 @@ def _prepare_snapshots(
                 "symbol": symbol,
                 "binance_server_time": asof,
                 "binance_server_time_utc": _utc(asof),
-                "sources": {"spot": SPOT_BASE, "futures": None},
+                "sources": {"spot": SPOT_PUBLIC_DATA_BASE, "futures": None},
                 "data_integrity": integrity,
             }
             spot = [{
