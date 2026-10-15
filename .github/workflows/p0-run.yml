@@ -47,7 +47,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: btc-market-lab-p0-\${{ github.run_id }}
+          name: btc-market-lab-p0
           path: |
             data/historical/BTCUSDT_1d.csv
             data/historical/BTCUSDT_4h.csv
