@@ -175,7 +175,7 @@ def download_to_csv(
     save_csv(path, rows)
     return {"path": str(path), "symbol": symbol, "interval": interval,
             "downloaded_count": len(fetched), "total_count": len(rows),
-            "normalized_exchange_close_time_count": sum(int(row.get("exchange_close_time", row["close_time"])) != int(row["close_time"]) for row in fetched),
+            "normalized_exchange_close_time_count": sum(int(row.get("exchange_close_time") or row["close_time"]) != int(row["close_time"]) for row in fetched),
             "data_integrity": report, "requested_start_utc": _utc(start_ms),
             "requested_end_exclusive_utc": _utc(end_ms)}
 
@@ -413,6 +413,10 @@ def run_backtest(path: Path, symbol: str, *, fee_bps: float = 10.0, slippage_bps
             groups[str(trade[key])].append(trade)
         return {name: _metrics(group) for name, group in sorted(groups.items())}
     return {"symbol": symbol, "interval": "1h", "strategy": "structure_break_with_order_block_v1",
+            "data_summary": {"closed_candles": n, "start_utc": rows[0].get("open_time_utc") or _utc(int(rows[0]["open_time"])),
+                             "end_utc": rows[-1].get("close_time_utc") or _utc(int(rows[-1]["close_time"])),
+                             "normalized_exchange_close_time_count": sum(
+                                 int(row.get("exchange_close_time") or row["close_time"]) != int(row["close_time"]) for row in rows)},
             "strategy_definition": "1H 收盤確認結構突破與同時確認 OB；下一根 1H 開盤進場，OB 外緣停損，固定目標 R。",
             "execution": {"signal": "closed_candle_only", "entry": "next_candle_open", "fee_bps_per_side": fee_bps,
                           "slippage_bps_per_side": slippage_bps, "target_r": target_r,
