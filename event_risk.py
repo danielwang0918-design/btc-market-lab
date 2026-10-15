@@ -87,6 +87,9 @@ def evaluate_event_risk(calendar: dict[str, Any], now: datetime, *, symbol: str 
         except (ValueError, TypeError):
             stale = True
     freshness_message = "行事曆超過 48 小時未同步；需人工確認官方時間是否有更新。" if stale else ""
+    incomplete_sources = calendar.get("sync_errors", [])
+    source_message = "部分官方 RSS 來源同步失敗；政策新聞覆蓋不完整，請人工檢查來源狀態。" if incomplete_sources else ""
+    warning = " ".join(part for part in (freshness_message, source_message) if part)
     upcoming: list[dict[str, Any]] = []
     active: list[dict[str, Any]] = []
     for event in calendar.get("events", []):
@@ -102,16 +105,17 @@ def evaluate_event_risk(calendar: dict[str, Any], now: datetime, *, symbol: str 
             upcoming.append({**event, "minutes_until_event": round(minutes, 1)})
     if active:
         return {"status": "active_blackout", "level": "critical", "candidate_action": "no_trade", "active_events": active,
-                "message": "重大已排程事件位於風險窗口內；候選情境暫停，待事件發布及市場重新評估後再分析。" + (f" {freshness_message}" if stale else ""),
-                "calendar_stale": stale}
+                "message": "重大已排程事件位於風險窗口內；候選情境暫停，待事件發布及市場重新評估後再分析。" + (f" {warning}" if warning else ""),
+                "calendar_stale": stale, "incomplete_sources": incomplete_sources}
     if upcoming:
         return {"status": "upcoming_high_risk", "level": "high", "candidate_action": "reassess", "active_events": upcoming,
-                "message": "24 小時內有重大事件；降低對候選情境的信心並在事件前重新評估風險。" + (f" {freshness_message}" if stale else ""),
-                "calendar_stale": stale}
-    return {"status": "stale_calendar" if stale else "clear", "level": "unknown" if stale else "normal",
-            "candidate_action": "manual_review" if stale else "none", "active_events": [],
-            "message": "行事曆沒有找到 24 小時內的已確認高風險事件；這不代表沒有突發新聞風險。" + (f" {freshness_message}" if stale else ""),
-            "calendar_stale": stale}
+                "message": "24 小時內有重大事件；降低對候選情境的信心並在事件前重新評估風險。" + (f" {warning}" if warning else ""),
+                "calendar_stale": stale, "incomplete_sources": incomplete_sources}
+    return {"status": "stale_calendar" if stale else "incomplete_calendar" if incomplete_sources else "clear",
+            "level": "unknown" if stale or incomplete_sources else "normal",
+            "candidate_action": "manual_review" if stale or incomplete_sources else "none", "active_events": [],
+            "message": "行事曆沒有找到 24 小時內的已確認高風險事件；這不代表沒有突發新聞風險。" + (f" {warning}" if warning else ""),
+            "calendar_stale": stale, "incomplete_sources": incomplete_sources}
 
 
 def _fetch(url: str) -> bytes:
