@@ -1,4 +1,5 @@
 name: P0 real-market backtest
+# Historical public market data uses data-api.binance.vision.
 
 on:
   push:
