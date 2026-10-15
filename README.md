@@ -85,7 +85,7 @@ Binance 公開 OI 統計、多空比及 taker 歷史統計目前只提供最近 
 
 ### P2：總經與政策事件風險提醒
 
-先同步 BLS 官方發布行事曆（含 CPI、Employment Situation 非農就業報告）、Fed 官方 FOMC 會議日期，以及 Fed/SEC 官方 RSS 標題：
+目前自動排程涵蓋美國 BLS 官方發布行事曆（含 CPI、Employment Situation 非農就業報告）與 Fed 官方 FOMC 會議日期；Fed/SEC 官方 RSS 標題另列為審查項目。其他國家央行/總經時程、政府政策及 BTC 產業重大事件，需依官方來源人工核對後加入：
 
 ```bash
 python3 event_risk.py sync
