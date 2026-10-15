@@ -703,6 +703,7 @@ def run_configuration(
     minimum_net_rr: float, max_setup_age_hours: int,
     fee_bps_per_side: float, slippage_bps_per_side: float,
     train_fraction: float = 0.6, validation_fraction: float = 0.2,
+    include_test: bool = True,
 ) -> dict[str, Any]:
     values = (minimum_net_rr, fee_bps_per_side, slippage_bps_per_side, train_fraction, validation_fraction)
     if not all(math.isfinite(value) for value in values):
@@ -721,6 +722,14 @@ def run_configuration(
         "trades": [],
     }
     for name, (start, end) in bounds.items():
+        if name == "test" and not include_test:
+            report["splits"][name] = {
+                "start_utc": _utc(int(rows[start]["open_time"])) if start < end else None,
+                "end_exclusive_utc": _utc(int(rows[end - 1]["close_time"]) + 1) if start < end else None,
+                "metrics": None,
+                "status": "not_evaluated_during_parameter_search",
+            }
+            continue
         trades = _simulate_slice(
             rows, snapshots, start, end, minimum_net_rr=minimum_net_rr,
             max_setup_age_hours=max_setup_age_hours, fee_bps=Decimal(str(fee_bps_per_side)),
@@ -761,6 +770,7 @@ def tune_parameters(
                 rows, snapshots, minimum_net_rr=rr, max_setup_age_hours=age,
                 fee_bps_per_side=fee_bps_per_side, slippage_bps_per_side=slippage_bps_per_side,
                 train_fraction=train_fraction, validation_fraction=validation_fraction,
+                include_test=False,
             )
             validation = result["splits"]["validation"]["metrics"]
             candidates.append({
