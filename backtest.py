@@ -228,7 +228,6 @@ def run_backtest(
     }
     trades: list[dict[str, Any]] = []
     consumed_setups: set[str] = set()
-    start_index = 0
     with tempfile.TemporaryDirectory(prefix="btc-market-backtest-") as temp:
         asof_path = Path(temp) / "asof.zip"
         for index, candle in enumerate(rows_1h[:-1]):
@@ -300,7 +299,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--fee-bps-per-side", required=True, help="Fee assumption per fill in basis points")
     parser.add_argument("--slippage-bps-per-side", required=True, help="Adverse slippage assumption per fill in basis points")
     parser.add_argument("--minimum-net-rr", required=True, help="Existing strategy's user-defined minimum net reward/risk")
-    parser.add_argument("--max-setup-age-hours", type=int, default=168, help="Maximum setup age, matching the existing strategy setting")
+    parser.add_argument("--max-setup-age-hours", type=int, required=True, help="Maximum setup age, matching the existing strategy setting")
     parser.add_argument("--out-of-sample-fraction", type=float, default=0.3, help="Chronological final holdout fraction (default: 0.3)")
     parser.add_argument("--output", type=Path, help="Report path (default: <archive>_backtest.json)")
     args = parser.parse_args(argv)
