@@ -2,9 +2,16 @@ import unittest
 from decimal import Decimal
 from pathlib import Path
 import tempfile
+import csv
+import io
+import json
+import zipfile
+from datetime import datetime, timezone
 
+import binance_market_data
 import backtest
 import market_research
+from market_structure import INTERVAL_MILLISECONDS, EVENT_COLUMNS, inspect_candle_integrity
 
 
 def bar(index, *, open_, high, low, close):
@@ -19,6 +26,49 @@ SIGNAL = {
     "generated_at_utc": "2025-01-01T00:59:59.999000+00:00",
     "scenario": {"entry_event_id": "ob-1", "target_event_id": "swing-1"},
 }
+
+
+def make_market_archive(path):
+    symbol = "BTCUSDT"
+    candles = []
+    by_interval = {"1d": [], "4h": [], "1h": []}
+    for interval, start, count in (("1d", 0, 1), ("4h", 0, 7), ("1h", 86_400_000, 3)):
+        step = INTERVAL_MILLISECONDS[interval]
+        for index in range(count):
+            opened = start + index * step
+            row = {
+                "symbol": symbol, "interval": interval, "open_time": str(opened),
+                "open_time_utc": datetime.fromtimestamp(opened / 1000, timezone.utc).isoformat(),
+                "open": "100", "high": "101", "low": "99", "close": "100", "volume": "1",
+                "close_time": str(opened + step - 1),
+                "close_time_utc": datetime.fromtimestamp((opened + step - 1) / 1000, timezone.utc).isoformat(),
+                "is_closed": "true", "source": binance_market_data.SOURCE_SPOT,
+            }
+            candles.append(row)
+            by_interval[interval].append(row)
+    server_time = int(candles[-1]["close_time"]) + 10_000
+    metadata = {
+        "symbol": symbol, "binance_server_time": server_time,
+        "sources": {"spot": binance_market_data.SPOT_BASE},
+        "data_integrity": {"intervals": {
+            interval: inspect_candle_integrity(rows, interval, server_time)
+            for interval, rows in by_interval.items()
+        }},
+    }
+    with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("metadata.json", json.dumps(metadata))
+        members = (
+            ("klines.csv", candles, binance_market_data.KLINE_COLUMNS),
+            ("market_structure.csv", [], EVENT_COLUMNS),
+            ("spot_price.csv", [{"symbol": symbol, "price": "100", "captured_at_utc": "2025-01-02T00:00:00+00:00", "source": binance_market_data.SOURCE_SPOT}], ["symbol", "price", "captured_at_utc", "source"]),
+        )
+        for name, rows, fields in members:
+            output = io.StringIO(newline="")
+            writer = csv.DictWriter(output, fieldnames=fields)
+            writer.writeheader()
+            writer.writerows(rows)
+            archive.writestr(name, "\ufeff" + output.getvalue())
+    return path
 
 
 class BacktestFillTests(unittest.TestCase):
@@ -87,6 +137,16 @@ class BacktestFillTests(unittest.TestCase):
 
         self.assertEqual([row["open_time"] for row in seen_candles], ["0"])
         self.assertEqual([row["event_id"] for row in seen_events], ["past"])
+
+    def test_full_backtest_preserves_the_source_archive(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = make_market_archive(Path(directory) / "market.zip")
+            original = source.read_bytes()
+            backtest.run_backtest(
+                source, fee_bps_per_side="10", slippage_bps_per_side="5",
+                minimum_net_rr="1.5", max_setup_age_hours=168,
+            )
+            self.assertEqual(source.read_bytes(), original)
 
 
 if __name__ == "__main__":

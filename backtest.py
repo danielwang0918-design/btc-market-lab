@@ -40,7 +40,7 @@ def _iso_ms(value: int) -> str:
 
 
 def _asof_archive(
-    path: Path,
+    output_path: Path,
     metadata: dict[str, Any],
     candles: list[dict[str, str]],
     events: list[dict[str, str]],
@@ -61,7 +61,7 @@ def _asof_archive(
         intervals[interval] = inspect_candle_integrity(interval_rows, interval, asof_ms)
     asof_metadata["data_integrity"] = {"intervals": intervals}
 
-    with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+    with zipfile.ZipFile(output_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         archive.writestr("metadata.json", json.dumps(asof_metadata, ensure_ascii=False))
         for member, rows in (("klines.csv", past_candles), ("market_structure.csv", past_events), ("spot_price.csv", past_spot)):
             fields = list(rows[0]) if rows else {
@@ -74,7 +74,7 @@ def _asof_archive(
             writer.writeheader()
             writer.writerows(rows)
             archive.writestr(member, "\ufeff" + output.getvalue())
-    return path
+    return output_path
 
 
 def _fill_prices(side: str, raw_entry: Decimal, raw_exit: Decimal, fee: Decimal, slip: Decimal) -> tuple[Decimal, Decimal, Decimal, Decimal]:
@@ -235,7 +235,7 @@ def run_backtest(
             asof_rows = [row for row in candles if int(row["close_time"]) < asof]
             if not all(any(row.get("interval") == interval for row in asof_rows) for interval in INTERVALS):
                 continue
-            _asof_archive(archive_path, metadata, candles, raw_events, symbol, asof, candle["close"])
+            _asof_archive(asof_path, metadata, candles, raw_events, symbol, asof, candle["close"])
             signal = market_research.build_analysis(asof_path, config, now=datetime.fromtimestamp(asof / 1000, timezone.utc))
             scenario = signal.get("scenario")
             if not scenario or signal.get("execution_state") != "目前已觸發":
