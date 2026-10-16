@@ -333,7 +333,7 @@ def simulate_filtered_slice(
                 close_time = int(prior["close_time"]) + 1
                 trades.append(hb._make_trade(
                     position, hb._number(prior["close"], "close", positive=True),
-                    close_time, "data_gap_exit", index - 1, fee_bps, slippage,
+                    close_time, "data_gap_exit", index - 1, fee_bps, slippage_bps,
                 ))
                 position = None
             pending = None
@@ -344,13 +344,13 @@ def simulate_filtered_slice(
                 raw_exit, reason = exit_result
                 trades.append(hb._make_trade(
                     position, raw_exit, int(bar["close_time"]) + 1,
-                    reason, index, fee_bps, slippage,
+                    reason, index, fee_bps, slippage_bps,
                 ))
                 position = None
             elif not current_snapshot.get("integrity_ok"):
                 trades.append(hb._make_trade(
                     position, hb._number(bar["close"], "close", positive=True),
-                    int(bar["close_time"]) + 1, "integrity_review_exit", index, fee_bps, slippage,
+                    int(bar["close_time"]) + 1, "integrity_review_exit", index, fee_bps, slippage_bps,
                 ))
                 position = None
         elif pending:
@@ -393,7 +393,7 @@ def simulate_filtered_slice(
                             raw_exit, reason = exit_result
                             trades.append(hb._make_trade(
                                 position, raw_exit, int(bar["close_time"]) + 1,
-                                reason, index, fee_bps, slippage,
+                                reason, index, fee_bps, slippage_bps,
                             ))
                             position = None
                     elif (not hb._candidate_allowed(candidate_now, minimum_net_rr, max_setup_age_hours)
@@ -412,7 +412,7 @@ def simulate_filtered_slice(
         last = rows[end - 1]
         trades.append(hb._make_trade(
             position, hb._number(last["close"], "close", positive=True),
-            int(last["close_time"]) + 1, "split_or_segment_end", end - 1, fee_bps, slippage,
+            int(last["close_time"]) + 1, "split_or_segment_end", end - 1, fee_bps, slippage_bps,
         ))
     return trades
 
