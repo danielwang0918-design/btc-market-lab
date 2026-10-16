@@ -209,6 +209,66 @@ class WinRateResearchTests(unittest.TestCase):
         self.assertIn("touch", names)
         self.assertIn("edge_reclaim_next_open", names)
 
+    def test_exhaustion_filters_reject_overbought_longs_and_oversold_shorts(self):
+        long_candidate = candidate(side="long")
+        short_candidate = candidate(side="short")
+        self.assertFalse(wr.entry_filter_passes(
+            "avoid_exhaustion_35_65", long_candidate, {"rsi14": 66}
+        ))
+        self.assertFalse(wr.entry_filter_passes(
+            "avoid_exhaustion_35_65", short_candidate, {"rsi14": 34}
+        ))
+        self.assertTrue(wr.entry_filter_passes(
+            "avoid_exhaustion_35_65", long_candidate, {"rsi14": 64}
+        ))
+        self.assertTrue(wr.entry_filter_passes(
+            "avoid_exhaustion_35_65", short_candidate, {"rsi14": 36}
+        ))
+
+    def test_train_calibrated_atr_filter_uses_fixed_training_cutoff(self):
+        row = candidate(side="long")
+        self.assertTrue(wr.entry_filter_passes(
+            "atr_pct_below_train_p75", row, {"atr_pct": 1.5}, atr_pct_cutoff=1.5
+        ))
+        self.assertFalse(wr.entry_filter_passes(
+            "atr_pct_below_train_p75", row, {"atr_pct": 1.51}, atr_pct_cutoff=1.5
+        ))
+        self.assertFalse(wr.entry_filter_passes(
+            "atr_pct_below_train_p75", row, {"atr_pct": 1.0}, atr_pct_cutoff=None
+        ))
+
+    def test_confirmed_entry_filter_is_evaluated_on_closed_retest_candle(self):
+        rows = [
+            candle(0, open_=101, high=103, low=100, close=102),
+            candle(1, open_=99, high=102, low=97, close=101.5),
+            candle(2, open_=102, high=126, low=101, close=124),
+        ]
+        setup = candidate(0, target="125", rr="2.5")
+        setup.update({
+            "zone_low": "95", "zone_high": "100",
+            "entry_reference": "100", "stop": "89",
+            "target": "125", "net_rr": "2.5",
+        })
+        snapshots = [
+            {"candidate": setup, "integrity_ok": True},
+            {"candidate": setup, "integrity_ok": True},
+            {"candidate": None, "integrity_ok": True},
+        ]
+        features = [
+            {"rsi14": 40},
+            {"rsi14": 60},
+            {"rsi14": 65},
+        ]
+        trades = wr.simulate_filtered_slice(
+            rows, copy.deepcopy(snapshots), features, 0, len(rows),
+            filter_name="rsi55", minimum_net_rr=1.5, max_setup_age_hours=168,
+            fee_bps=Decimal("10"), slippage_bps=Decimal("5"),
+            entry_mode="edge_reclaim_next_open", target_mode="swing",
+        )
+        self.assertEqual(len(trades), 1)
+        self.assertEqual(trades[0]["raw_entry_price"], "102")
+        self.assertEqual(trades[0]["exit_reason"], "target")
+
     def test_filter_specs_are_unique_and_cover_the_no_filter_baseline(self):
         names = [name for name, _ in wr.FILTERS]
         self.assertEqual(len(names), len(set(names)))
