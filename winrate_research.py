@@ -26,6 +26,9 @@ FILTERS: tuple[tuple[str, str], ...] = (
     ("rsi50", "1H RSI(14) is at least 50 for long or at most 50 for short."),
     ("rsi55", "1H RSI(14) is at least 55 for long or at most 45 for short."),
     ("rsi60", "1H RSI(14) is at least 60 for long or at most 40 for short."),
+    ("avoid_exhaustion_35_65", "Reject long retests with 1H RSI >= 65 and short retests with 1H RSI <= 35."),
+    ("avoid_exhaustion_30_70", "Reject long retests with 1H RSI >= 70 and short retests with 1H RSI <= 30."),
+    ("atr_pct_below_train_p75", "1H ATR as a percentage of price is no higher than its training-period 75th percentile."),
     ("ema4h1d_rsi55", "4H and daily EMA20 position plus directional 1H RSI 55/45."),
     ("ema_stack_rsi55", "1H/4H/daily EMA20 position plus directional 1H RSI 55/45."),
     ("relative_volume12", "Closed signal-bar volume is at least 1.2 times the preceding 20-bar mean."),
@@ -172,6 +175,11 @@ def build_feature_rows(
         one = indicators["1h"]
         feature["rsi14"] = one["rsi14"][i] if i >= 0 else None
         feature["atr14"] = one["atr14"][i] if i >= 0 else None
+        feature["atr_pct"] = (
+            one["atr14"][i] / one["close"][i] * 100.0
+            if i >= 0 and one["atr14"][i] is not None and one["close"][i] > 0
+            else None
+        )
         # The current signal candle is closed; its volume is compared with the prior 20 bars.
         if i >= 0 and i - one["segment_start"][i] >= 20:
             prior = one["volume"][i - 20:i]
@@ -195,6 +203,8 @@ def entry_filter_passes(
     name: str,
     candidate: dict[str, Any],
     feature: dict[str, Any],
+    *,
+    atr_pct_cutoff: float | None = None,
 ) -> bool:
     side = str(candidate.get("side", ""))
     if side not in {"long", "short"}:
@@ -230,6 +240,13 @@ def entry_filter_passes(
         return rsi is not None and (rsi >= 55 if side == "long" else rsi <= 45)
     if name == "rsi60":
         return rsi is not None and (rsi >= 60 if side == "long" else rsi <= 40)
+    if name == "avoid_exhaustion_35_65":
+        return rsi is not None and not (rsi >= 65 if side == "long" else rsi <= 35)
+    if name == "avoid_exhaustion_30_70":
+        return rsi is not None and not (rsi >= 70 if side == "long" else rsi <= 30)
+    if name == "atr_pct_below_train_p75":
+        atr_pct = feature.get("atr_pct")
+        return atr_pct_cutoff is not None and atr_pct is not None and float(atr_pct) <= atr_pct_cutoff
     if name == "ema4h1d_rsi55":
         return p4 and pd and rsi is not None and (rsi >= 55 if side == "long" else rsi <= 45)
     if name == "ema_stack_rsi55":
@@ -348,6 +365,7 @@ def simulate_filtered_slice(
     slippage_bps: Decimal,
     entry_mode: str = "touch",
     target_mode: str = "swing",
+    atr_pct_cutoff: float | None = None,
 ) -> list[dict[str, Any]]:
     """Same conservative order/exit rules, optionally waiting for a closed-candle confirmation."""
     trades: list[dict[str, Any]] = []
@@ -472,10 +490,20 @@ def simulate_filtered_slice(
                                 position = None
                         else:
                             setup_id = str(pending["setup_id"])
-                            consumed_setups.add(setup_id)
-                            if _entry_confirmation_passes(entry_mode, side, bar, zone_low, zone_high):
+                            retest_candidate = dict(pending)
+                            retest_candidate["setup_age_hours"] = (
+                                int(bar["close_time"]) + 1 - int(pending["setup_confirm_ms"])
+                            ) / 3_600_000
+                            filter_ok = entry_filter_passes(
+                                filter_name, retest_candidate, features[index],
+                                atr_pct_cutoff=atr_pct_cutoff,
+                            )
+                            if filter_ok and _entry_confirmation_passes(
+                                entry_mode, side, bar, zone_low, zone_high
+                            ):
                                 confirmed_for_next_open = dict(pending)
-                            pending = None
+                                consumed_setups.add(setup_id)
+                                pending = None
                     elif (not hb._candidate_allowed(candidate_now, minimum_net_rr, max_setup_age_hours)
                           or candidate_now.get("setup_id") != pending.get("setup_id")):
                         pending = None
@@ -483,7 +511,13 @@ def simulate_filtered_slice(
         if (position is None and pending is None and confirmed_for_next_open is None
                 and current_snapshot.get("integrity_ok")):
             if hb._candidate_allowed(candidate, minimum_net_rr, max_setup_age_hours):
-                if candidate and entry_filter_passes(filter_name, candidate, features[index]):
+                if candidate and (
+                    entry_mode != "touch"
+                    or entry_filter_passes(
+                        filter_name, candidate, features[index],
+                        atr_pct_cutoff=atr_pct_cutoff,
+                    )
+                ):
                     setup_id = str(candidate["setup_id"])
                     if setup_id not in consumed_setups:
                         pending = dict(candidate)
@@ -537,6 +571,14 @@ def _sort_profit_factor(value: Any) -> float:
     if value is None:
         return -1.0
     return float(value)
+
+
+def _training_percentile(values: list[float], quantile: float) -> float | None:
+    clean = sorted(value for value in values if math.isfinite(value))
+    if not clean:
+        return None
+    rank = max(0, min(len(clean) - 1, math.ceil(quantile * len(clean)) - 1))
+    return clean[rank]
 
 
 def _select_candidate(candidates: list[dict[str, Any]], minimum_validation_trades: int) -> tuple[dict[str, Any], str]:
@@ -602,6 +644,15 @@ def run_research(
         for interval in ("1h", "4h", "1d")
     }
     features = build_feature_rows(rows_by_interval, rows)
+    split_bounds = hb._split_ranges(rows, 0.6, 0.2)
+    atr_pct_cutoff = _training_percentile(
+        [
+            float(feature["atr_pct"])
+            for feature in features[:split_bounds["train"][1]]
+            if feature.get("atr_pct") is not None
+        ],
+        0.75,
+    )
     baseline = hb.run_configuration(
         rows, snapshots,
         minimum_net_rr=1.5, max_setup_age_hours=168,
@@ -639,6 +690,7 @@ def run_research(
                     max_setup_age_hours=age_limit,
                     fee_bps=fee_bps,
                     slippage_bps=slippage_bps,
+                    atr_pct_cutoff=atr_pct_cutoff,
                 )
                 split_metrics[split_name] = _metrics(trades)
             candidates.append({
@@ -682,6 +734,7 @@ def run_research(
                         slippage_bps=slippage_bps,
                         entry_mode=entry_mode,
                         target_mode=target_mode,
+                        atr_pct_cutoff=atr_pct_cutoff,
                     )
                     split_metrics[split_name] = _metrics(trades)
                 candidates.append({
@@ -713,6 +766,7 @@ def run_research(
         slippage_bps=slippage_bps,
         entry_mode=selected_entry_mode,
         target_mode=selected_target,
+        atr_pct_cutoff=atr_pct_cutoff,
     )
     selected_test = _metrics(selected_test_trades)
     baseline_test = baseline["splits"]["test"]["metrics"]
@@ -747,6 +801,8 @@ def run_research(
             "feature_timing": "EMA, RSI, ATR, and volume filters use only candles fully closed by the signal timestamp.",
             "minimum_validation_trades": minimum_validation_trades,
             "minimum_validation_trades_for_profitability_gate": MIN_VALIDATION_TRADES_FOR_PROFITABILITY,
+            "atr_pct_cutoff_fitted_on_training_split_only": atr_pct_cutoff,
+            "confirmed_entry_filters_are_evaluated_on_the_closed_retest_candle": True,
             "target_win_rate_percent": TARGET_WIN_RATE,
         },
         "baseline": {
