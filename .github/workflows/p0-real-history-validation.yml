@@ -1,8 +1,24 @@
 name: P0 real-history validation
 
 on:
+  push:
+    branches: ["codex/p0-integrated-mtf-backtest"]
+    paths:
+      - "historical_backtest.py"
+      - "market_research.py"
+      - "market_structure.py"
+      - "binance_market_data.py"
+      - "test_historical_backtest.py"
+      - ".github/workflows/p0-real-history-validation.yml"
   pull_request:
     branches: ["main"]
+    paths:
+      - "historical_backtest.py"
+      - "market_research.py"
+      - "market_structure.py"
+      - "binance_market_data.py"
+      - "test_historical_backtest.py"
+      - ".github/workflows/p0-real-history-validation.yml"
   workflow_dispatch:
 
 permissions:
