@@ -1,0 +1,119 @@
+name: BTC stop-loss structure comparison
+
+on:
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "stop_loss_research.py"
+      - "test_stop_loss_research.py"
+      - "historical_backtest.py"
+      - "market_structure.py"
+      - "market_research.py"
+      - "winrate_research.py"
+      - "binance_market_data.py"
+      - ".github/workflows/stop-loss-research.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: btc-stop-loss-research-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  comparison:
+    name: Compare original and wider higher-timeframe stops
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Run unit tests
+        run: python -m unittest -v
+
+      - name: Download Binance Spot history
+        run: python -u historical_backtest.py download-all BTCUSDT
+
+      - name: Compare stop-loss variants
+        run: >-
+          python -u stop_loss_research.py BTCUSDT
+          --fee-bps-per-side 10
+          --slippage-bps-per-side 5
+          --minimum-net-rr 1.5
+          --max-setup-age-hours 168
+          --atr-multiple 0.25
+
+      - name: Publish comparison summary
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          report_path = Path("data/historical/BTCUSDT_stop_loss_research.json")
+          summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+          if not report_path.exists():
+              message = "The stop-loss comparison report was not produced. Inspect earlier workflow steps."
+              print(message)
+              if summary_path:
+                  with open(summary_path, "a", encoding="utf-8") as stream:
+                      stream.write("# BTC stop-loss comparison\n\n" + message + "\n")
+              raise SystemExit(0)
+
+          report = json.loads(report_path.read_text(encoding="utf-8"))
+          lines = [
+              "# BTCUSDT stop-loss comparison", "",
+              f'- Data: {report["data"]["historical_hourly_candles"]:,} historical 1H candles.',
+              f'- Strategy: {report["strategy"]}; 10 bps fee + 5 bps slippage each side.',
+              f'- Fixed rules: minimum net RR {report["parameters"]["minimum_net_rr_after_costs"]}; setup age <= {report["parameters"]["maximum_setup_age_hours"]} hours.',
+              f'- Wider-stop buffer: {report["parameters"]["atr_buffer_multiple"]} x closed 4H ATR(14).',
+              "- Entry and target rules are kept fixed. Wider-stop variants must still satisfy the minimum net RR after costs.",
+              "- Only closed 4H candles and already-confirmed 4H swing points are used.", "",
+              "## Main comparison", "",
+              "| Variant | Split | Trades | Win rate (%) | Expectancy (R) | Profit factor | Max DD (R) | Avg stop distance (%) | Stops within 2 bars / all stops (%) |",
+              "|---|---|---:|---:|---:|---:|---:|---:|---:|",
+          ]
+          for name, variant in report["variants"].items():
+              for split in ("train", "validation", "test"):
+                  item = variant["splits"][split]
+                  m, d = item["metrics"], item["stop_diagnostics"]
+                  lines.append(
+                      f'| {name} | {split} | {m["trade_count"]} | {m["win_rate_percent"]} | '
+                      f'{m["expectancy_r"]} | {m["profit_factor"]} | {m["max_drawdown_r"]} | '
+                      f'{d["average_initial_stop_distance_percent"]} | '
+                      f'{d["rapid_stops_within_2_bars"]}/{d["stop_trade_count"]} ({d["rapid_stops_percent_of_stopped_trades"]}%) |'
+                  )
+          lines += [
+              "", "## Interpretation guide", "",
+              "- The untouched test split is the primary decision input; training/validation alone do not prove forward performance.",
+              "- Fewer rapid stops alone is not enough: expectancy, profit factor, drawdown, and sample size must also be considered.",
+              "- A wider stop can lower net RR and exclude setups under the unchanged minimum-RR rule, so trade counts are shown.",
+              "- Historical simulation is not a guarantee of future results.",
+          ]
+          text = "\n".join(lines) + "\n"
+          print(text)
+          if summary_path:
+              with open(summary_path, "a", encoding="utf-8") as stream:
+                  stream.write(text)
+          PY
+
+      - name: Upload history and backtest artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: BTCUSDT-stop-loss-research-${{ github.run_id }}
+          path: |
+            data/historical/BTCUSDT_1d.csv
+            data/historical/BTCUSDT_4h.csv
+            data/historical/BTCUSDT_1h.csv
+            data/historical/BTCUSDT_stop_loss_research.json
+          if-no-files-found: warn
+          retention-days: 30
