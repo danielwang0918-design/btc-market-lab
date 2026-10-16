@@ -17,7 +17,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: win-rate-research-\${{ github.event.pull_request.number || github.ref }}
+  group: win-rate-research-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -142,7 +142,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: BTCUSDT-winrate-research-\${{ github.run_id }}
+          name: BTCUSDT-winrate-research-${{ github.run_id }}
           path: |
             data/historical/BTCUSDT_1d.csv
             data/historical/BTCUSDT_4h.csv
