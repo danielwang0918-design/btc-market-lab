@@ -6,7 +6,7 @@ import anti_gambling_reference_backtest as arb
 
 def daily_rows(closes):
     step = arb.INTERVAL_MILLISECONDS["1d"]
-    base = 1_700_000_000_000
+    base = 1_699_920_000_000
     rows = []
     previous_open = None
     for i, close in enumerate(closes):
@@ -41,6 +41,7 @@ class AntiGamblingReferenceBacktestTests(unittest.TestCase):
     def test_buy_signal_fills_at_next_daily_open(self):
         rows = daily_rows([100, 100, 100, 100, 100])
         rows[2]["open"] = "101"
+        rows[2]["high"] = "101.2"
         features = [
             {"sma_fast": None, "sma_slow": None, "long_condition": False},
             {"sma_fast": 101.0, "sma_slow": 100.0, "long_condition": True},
