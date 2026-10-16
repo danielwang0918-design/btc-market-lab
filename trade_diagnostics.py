@@ -173,7 +173,10 @@ def diagnose(
     }
     report_path = input_report or data_dir / f"{symbol}_mtf_backtest.json"
     report = json.loads(report_path.read_text(encoding="utf-8"))
-    trades = report.get("trades", [])
+    trades = report.get("trades")
+    if not trades and isinstance(report.get("selection"), dict):
+        selected_test = report["selection"].get("test_trades", [])
+        trades = [dict(row, split=row.get("split", "test")) for row in selected_test]
     if not trades:
         raise ValueError(f"No trade records found in {report_path}")
 
@@ -363,6 +366,7 @@ def main() -> int:
     parser.add_argument("symbol", nargs="?", default="BTCUSDT")
     parser.add_argument("--data-dir", type=Path, default=Path("data/historical"))
     parser.add_argument("--input-report", type=Path)
+    parser.add_argument("--research-report", type=Path)
     parser.add_argument("--output-json", type=Path)
     parser.add_argument("--output-csv", type=Path)
     args = parser.parse_args()
@@ -372,6 +376,17 @@ def main() -> int:
         output_json=args.output_json,
         output_csv=args.output_csv,
     )
+    research_path = args.research_report or args.data_dir / f"{args.symbol}_winrate_research.json"
+    if research_path.exists():
+        selected_report = json.loads(research_path.read_text(encoding="utf-8"))
+        selected_trades = selected_report.get("selection", {}).get("test_trades", [])
+        if selected_trades:
+            diagnose(
+                args.symbol, args.data_dir,
+                input_report=research_path,
+                output_json=args.data_dir / f"{args.symbol}_selected_test_diagnostics.json",
+                output_csv=args.data_dir / f"{args.symbol}_selected_test_diagnostics.csv",
+            )
     return 0
 
 
