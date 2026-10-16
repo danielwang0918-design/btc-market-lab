@@ -62,7 +62,7 @@ class PublicStrategyBenchmarkTests(unittest.TestCase):
         )
         self.assertGreaterEqual(len(trades), 1)
         self.assertEqual(trades[0]["exit_reason"], "stop")
-        self.assertAlmostEqual(float(trades[0]["raw_exit_price"] if "raw_exit_price" in trades[0] else trades[0]["exit_price"]), 98.5, places=5)
+        self.assertAlmostEqual(float(trades[0]["exit_price"]), 98.5 * (1.0 - 5.0 / 10000.0), places=5)
 
     def test_supertrend_position_closes_at_gap_instead_of_crossing_it(self):
         rows = candles(5)
