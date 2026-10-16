@@ -39,6 +39,7 @@ FILTERS: tuple[tuple[str, str], ...] = (
     ("ema4h1d_rsi55_age72", "4H/daily EMA20 position, directional RSI 55/45, and setup age at most 72 hours."),
 )
 TARGET_WIN_RATE = 70.0
+MIN_VALIDATION_TRADES_FOR_PROFITABILITY = 12
 
 
 def _ema(values: list[float], period: int) -> list[float | None]:
@@ -469,7 +470,10 @@ def _select_candidate(candidates: list[dict[str, Any]], minimum_validation_trade
 
     profitable = [
         row for row in eligible
-        if row["validation"]["expectancy_r"] > 0
+        if row["validation"]["trade_count"] >= max(
+            minimum_validation_trades, MIN_VALIDATION_TRADES_FOR_PROFITABILITY
+        )
+        and row["validation"]["expectancy_r"] > 0
         and _sort_profit_factor(row["validation"]["profit_factor"]) > 1
     ]
     if profitable:
@@ -614,6 +618,7 @@ def run_research(
             "fixed_R_targets": "Experimental exit-only variants. The formal entry, OB edge stop, and original swing-target eligibility gate remain unchanged; fixed-R targets are not claimed to be superior.",
             "feature_timing": "EMA, RSI, ATR, and volume filters use only candles fully closed by the signal timestamp.",
             "minimum_validation_trades": minimum_validation_trades,
+            "minimum_validation_trades_for_profitability_gate": MIN_VALIDATION_TRADES_FOR_PROFITABILITY,
             "target_win_rate_percent": TARGET_WIN_RATE,
         },
         "baseline": {
