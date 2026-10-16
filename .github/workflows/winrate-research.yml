@@ -1,0 +1,153 @@
+name: BTC win-rate research
+
+on:
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "winrate_research.py"
+      - "test_winrate_research.py"
+      - "historical_backtest.py"
+      - "market_research.py"
+      - "market_structure.py"
+      - "binance_market_data.py"
+      - ".github/workflows/winrate-research.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: win-rate-research-\${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  win-rate-study:
+    name: Download data and test entry filters / exit targets
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Run unit tests
+        run: python -m unittest -v
+
+      - name: Download Binance Spot history
+        run: python -u historical_backtest.py download-all BTCUSDT
+
+      - name: Research predefined filters and target variants
+        run: >-
+          python -u winrate_research.py BTCUSDT
+          --fee-bps-per-side 10
+          --slippage-bps-per-side 5
+          --minimum-validation-trades 8
+
+      - name: Publish a readable run summary
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          path = Path("data/historical/BTCUSDT_winrate_research.json")
+          summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+          if not path.exists():
+              message = "Win-rate research report was not produced. Inspect the earlier failed step."
+              print(message)
+              if summary_path:
+                  with open(summary_path, "a", encoding="utf-8") as stream:
+                      stream.write("# BTC win-rate research\n\n" + message + "\n")
+              raise SystemExit(0)
+
+          report = json.loads(path.read_text(encoding="utf-8"))
+          baseline = report["baseline"]
+          selection = report["selection"]
+
+          def row(name, metrics):
+              return (
+                  f'| {name} | {metrics["trade_count"]} | {metrics["win_rate_percent"]} | '
+                  f'{metrics["expectancy_r"]} | {metrics["profit_factor"]} | {metrics["max_drawdown_r"]} |'
+              )
+
+          lines = [
+              "# BTCUSDT win-rate research",
+              "",
+              "Research target: 70% win rate. This is not assumed or guaranteed.",
+              "",
+              "## Formal strategy baseline",
+              "",
+              "Strategy: mtf-bos-ob-retest-v1; original swing target and stop rules; 10 bps fee and 5 bps slippage per side.",
+              "",
+              "| Split | Trades | Win rate (%) | Expectancy (R) | Profit factor | Max drawdown (R) |",
+              "|---|---:|---:|---:|---:|---:|",
+          ]
+          for split in ("train", "validation", "test"):
+              lines.append(row(split, baseline["splits"][split]["metrics"]))
+
+          lines += [
+              "",
+              "## Validation-selected candidate (only this variant is evaluated on test)",
+              "",
+              f'- Selection status: {selection["status"]}',
+              f'- Target mode: {selection["selected_target_mode"]}',
+              f'- Entry filter: {selection["selected_filter"]}',
+              f'- Filter definition: {selection["selected_filter_description"]}',
+              "",
+              "| Split | Trades | Win rate (%) | Expectancy (R) | Profit factor | Max drawdown (R) |",
+              "|---|---:|---:|---:|---:|---:|",
+              row("train", selection["selected_train_metrics"]),
+              row("validation", selection["selected_validation_metrics"]),
+              row("selected test", selection["selected_test_metrics"]),
+              "",
+              f'- Test win-rate point estimate at least 70%: {selection["test_win_rate_point_estimate_at_least_70_percent"]}',
+              f'- Test has at least 20 trades: {selection["test_sample_at_least_20_trades"]}',
+              f'- Test meets win-rate and profitability gate: {selection["test_meets_win_rate_and_profitability_gate"]}',
+              "",
+              "## Validation ranking",
+              "",
+              "The candidate grid contains training and validation metrics only; no test metrics are used to rank candidates.",
+              "",
+              "| Target | Filter | Validation trades | Validation win rate (%) | Expectancy (R) | Profit factor |",
+              "|---|---|---:|---:|---:|---:|",
+          ]
+          for candidate in report["candidates"][:15]:
+              v = candidate["validation"]
+              lines.append(
+                  f'| {candidate["target_mode"]} | {candidate["filter"]} | {v["trade_count"]} | '
+                  f'{v["win_rate_percent"]} | {v["expectancy_r"]} | {v["profit_factor"]} |'
+              )
+
+          lines += [
+              "",
+              "## Interpretation",
+              "",
+              "- A high win rate with too few trades or negative expectancy is not evidence of a useful strategy.",
+              "- The final test is run only for the selected candidate and the fixed baseline.",
+              "- All results are historical simulations; no account access or orders are involved.",
+          ]
+          text = "\n".join(lines) + "\n"
+          print(text)
+          if summary_path:
+              with open(summary_path, "a", encoding="utf-8") as stream:
+                  stream.write(text)
+          PY
+
+      - name: Upload history and research reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: BTCUSDT-winrate-research-\${{ github.run_id }}
+          path: |
+            data/historical/BTCUSDT_1d.csv
+            data/historical/BTCUSDT_4h.csv
+            data/historical/BTCUSDT_1h.csv
+            data/historical/BTCUSDT_mtf_backtest.json
+            data/historical/BTCUSDT_winrate_research.json
+          if-no-files-found: warn
+          retention-days: 30
