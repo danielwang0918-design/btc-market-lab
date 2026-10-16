@@ -407,7 +407,6 @@ def simulate_filtered_slice(
                     if setup_id not in consumed_setups:
                         pending = dict(candidate)
                         pending["signal_index"] = index
-                        consumed_setups.add(setup_id) if False else None
     if position:
         last = rows[end - 1]
         trades.append(hb._make_trade(
