@@ -158,6 +158,57 @@ class WinRateResearchTests(unittest.TestCase):
         self.assertEqual(status, "no_validation_candidate_passed_profitability_gate_exploratory_only")
         self.assertEqual(selected["filter"], "rsi55")
 
+    def test_edge_reclaim_enters_at_the_next_hour_open(self):
+        rows = [
+            candle(0, open_=101, high=103, low=100, close=102),
+            candle(1, open_=99, high=102, low=97, close=101.5),
+            candle(2, open_=102, high=151, low=101, close=145),
+        ]
+        setup = candidate(0, target="150", rr="5")
+        setup.update({"zone_low": "95", "zone_high": "100", "entry_reference": "100", "stop": "95"})
+        snapshots = [
+            {"candidate": setup, "integrity_ok": True},
+            {"candidate": setup, "integrity_ok": True},
+            {"candidate": None, "integrity_ok": True},
+        ]
+        trades = wr.simulate_filtered_slice(
+            rows, copy.deepcopy(snapshots), [{} for _ in rows], 0, len(rows),
+            filter_name="none", minimum_net_rr=1.5, max_setup_age_hours=168,
+            fee_bps=Decimal("10"), slippage_bps=Decimal("5"),
+            entry_mode="edge_reclaim_next_open", target_mode="swing",
+        )
+        self.assertEqual(len(trades), 1)
+        self.assertEqual(trades[0]["entry_time_utc"], hb._utc(int(rows[2]["open_time"])))
+        self.assertEqual(trades[0]["raw_entry_price"], "102")
+        self.assertEqual(trades[0]["exit_reason"], "target")
+
+    def test_edge_reclaim_does_not_enter_without_closing_beyond_ob_edge(self):
+        rows = [
+            candle(0, open_=101, high=103, low=100, close=102),
+            candle(1, open_=99, high=102, low=97, close=99.5),
+            candle(2, open_=102, high=151, low=101, close=145),
+        ]
+        setup = candidate(0, target="150", rr="5")
+        setup.update({"zone_low": "95", "zone_high": "100", "entry_reference": "100", "stop": "95"})
+        snapshots = [
+            {"candidate": setup, "integrity_ok": True},
+            {"candidate": setup, "integrity_ok": True},
+            {"candidate": None, "integrity_ok": True},
+        ]
+        trades = wr.simulate_filtered_slice(
+            rows, copy.deepcopy(snapshots), [{} for _ in rows], 0, len(rows),
+            filter_name="none", minimum_net_rr=1.5, max_setup_age_hours=168,
+            fee_bps=Decimal("10"), slippage_bps=Decimal("5"),
+            entry_mode="edge_reclaim_next_open", target_mode="swing",
+        )
+        self.assertEqual(trades, [])
+
+    def test_entry_modes_are_unique_and_include_formal_touch_baseline(self):
+        names = [name for name, _ in wr.ENTRY_MODES]
+        self.assertEqual(len(names), len(set(names)))
+        self.assertIn("touch", names)
+        self.assertIn("edge_reclaim_next_open", names)
+
     def test_filter_specs_are_unique_and_cover_the_no_filter_baseline(self):
         names = [name for name, _ in wr.FILTERS]
         self.assertEqual(len(names), len(set(names)))
