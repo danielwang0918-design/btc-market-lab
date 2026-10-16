@@ -704,7 +704,10 @@ def run_research(
                 "eligible_for_selection": split_metrics["validation"]["trade_count"] >= minimum_validation_trades,
             })
 
-    confirmation_filters = {"none", "ema4h1d_position", "rsi55", "original_rr25", "relative_volume12"}
+    confirmation_filters = {
+        "none", "ema4h1d_position", "rsi55", "original_rr25", "relative_volume12",
+        "avoid_exhaustion_35_65", "avoid_exhaustion_30_70", "atr_pct_below_train_p75",
+    }
     for target_mode in TARGETS:
         target_snaps = make_target_snapshots(
             snapshots, target_mode, fee_bps=fee_bps, slippage_bps=slippage_bps
