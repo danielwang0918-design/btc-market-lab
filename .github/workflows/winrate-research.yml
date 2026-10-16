@@ -47,6 +47,12 @@ jobs:
           --slippage-bps-per-side 5
           --minimum-validation-trades 8
 
+      - name: Diagnose every baseline trade
+        if: always()
+        run: >-
+          python -u trade_diagnostics.py BTCUSDT
+          --data-dir data/historical
+
       - name: Publish a readable run summary
         if: always()
         run: |
@@ -68,6 +74,8 @@ jobs:
           report = json.loads(path.read_text(encoding="utf-8"))
           baseline = report["baseline"]
           selection = report["selection"]
+          diagnostic_path = Path("data/historical/BTCUSDT_trade_diagnostics.json")
+          diagnostics = json.loads(diagnostic_path.read_text(encoding="utf-8")) if diagnostic_path.exists() else None
 
           def row(name, metrics):
               return (
@@ -125,6 +133,47 @@ jobs:
                   f'{v["win_rate_percent"]} | {v["expectancy_r"]} | {v["profit_factor"]} |'
               )
 
+          if diagnostics:
+              lines += [
+                  "",
+                  "## Trade-by-trade failure diagnostics",
+                  "",
+                  f'- Training-only ATR/price 75th percentile: {diagnostics["training_75th_percentile_atr_pct"]}',
+                  "",
+                  "| Split | Trades | Wins | Losses | Win rate (%) | Expectancy (R) |",
+                  "|---|---:|---:|---:|---:|---:|",
+              ]
+              for split in ("train", "validation", "test"):
+                  item = diagnostics["split_summaries"].get(split)
+                  if item:
+                      lines.append(
+                          f'| {split} | {item["trade_count"]} | {item["win_count"]} | {item["loss_count"]} | '
+                          f'{item["win_rate_percent"]} | {item["expectancy_r"]} |'
+                      )
+              test_diag = diagnostics["split_summaries"].get("test", {})
+              failure_flags = test_diag.get("failure_flags", {})
+              top_flags = sorted(
+                  failure_flags.items(),
+                  key=lambda item: item[1]["percent_of_losses_with_flag"],
+                  reverse=True,
+              )[:8]
+              lines += [
+                  "",
+                  "### Most common observed flags on test-set losses",
+                  "",
+                  "| Observed flag | Losing trades with flag | Percent of test losses | Win rate when flagged (%) |",
+                  "|---|---:|---:|---:|",
+              ]
+              for flag, detail in top_flags:
+                  lines.append(
+                      f'| {flag} | {detail["flagged_loss_count"]} | '
+                      f'{detail["percent_of_losses_with_flag"]} | {detail["flagged_win_rate_percent"]} |'
+                  )
+              lines += [
+                  "",
+                  "Flags are diagnostic associations, not proof of causality; each trade's entry/exit path and indicator context are in the artifact JSON/CSV.",
+              ]
+
           lines += [
               "",
               "## Interpretation",
@@ -151,5 +200,7 @@ jobs:
             data/historical/BTCUSDT_1h.csv
             data/historical/BTCUSDT_mtf_backtest.json
             data/historical/BTCUSDT_winrate_research.json
+            data/historical/BTCUSDT_trade_diagnostics.json
+            data/historical/BTCUSDT_trade_diagnostics.csv
           if-no-files-found: warn
           retention-days: 30
