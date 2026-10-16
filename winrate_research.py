@@ -92,14 +92,38 @@ def _atr(rows: list[dict[str, Any]], period: int = 14) -> list[float | None]:
     return result
 
 
-def _interval_indicators(rows: list[dict[str, Any]]) -> dict[str, Any]:
+def _interval_indicators(rows: list[dict[str, Any]], interval: str) -> dict[str, Any]:
+    count = len(rows)
     close = [float(row["close"]) for row in rows]
+    volume = [float(row["volume"]) for row in rows]
+    ema20: list[float | None] = [None] * count
+    rsi14: list[float | None] = [None] * count
+    atr14: list[float | None] = [None] * count
+    segment_start = [0] * count
+    step = INTERVAL_MILLISECONDS[interval]
+    boundaries = [0]
+    for index in range(1, count):
+        if int(rows[index]["open_time"]) - int(rows[index - 1]["open_time"]) != step:
+            boundaries.append(index)
+    boundaries.append(count)
+    for start, end in zip(boundaries, boundaries[1:]):
+        for index in range(start, end):
+            segment_start[index] = start
+        local_rows = rows[start:end]
+        local_close = close[start:end]
+        local_ema = _ema(local_close, 20)
+        local_rsi = _rsi(local_close, 14)
+        local_atr = _atr(local_rows, 14)
+        ema20[start:end] = local_ema
+        rsi14[start:end] = local_rsi
+        atr14[start:end] = local_atr
     return {
         "close": close,
-        "ema20": _ema(close, 20),
-        "rsi14": _rsi(close, 14),
-        "atr14": _atr(rows, 14),
-        "volume": [float(row["volume"]) for row in rows],
+        "ema20": ema20,
+        "rsi14": rsi14,
+        "atr14": atr14,
+        "volume": volume,
+        "segment_start": segment_start,
         "close_after_ms": [int(row["close_time"]) + 1 for row in rows],
     }
 
@@ -113,7 +137,7 @@ def build_feature_rows(
     hourly_rows: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     """Features are computed only from candles fully closed at each hourly signal time."""
-    indicators = {key: _interval_indicators(value) for key, value in rows_by_interval.items()}
+    indicators = {key: _interval_indicators(value, key) for key, value in rows_by_interval.items()}
     output: list[dict[str, Any]] = []
     for hourly in hourly_rows:
         asof_ms = int(hourly["close_time"]) + 1
@@ -143,7 +167,7 @@ def build_feature_rows(
         feature["rsi14"] = one["rsi14"][i] if i >= 0 else None
         feature["atr14"] = one["atr14"][i] if i >= 0 else None
         # The current signal candle is closed; its volume is compared with the prior 20 bars.
-        if i >= 20:
+        if i >= 0 and i - one["segment_start"][i] >= 20:
             prior = one["volume"][i - 20:i]
             mean_prior = sum(prior) / len(prior)
             feature["relative_volume20"] = one["volume"][i] / mean_prior if mean_prior > 0 else None
@@ -521,6 +545,7 @@ def run_research(
         bounds = hb._split_ranges(rows, 0.6, 0.2)
         for filter_name, description in FILTERS:
             split_metrics: dict[str, Any] = {}
+            age_limit = 24 if filter_name == "age24" else 48 if filter_name == "age48" else 72 if filter_name in {"age72", "ema4h1d_rsi55_age72"} else 168
             for split_name, (start, end) in bounds.items():
                 if split_name == "test":
                     continue
@@ -528,7 +553,7 @@ def run_research(
                     rows, target_snaps, features, start, end,
                     filter_name=filter_name,
                     minimum_net_rr=filter_threshold,
-                    max_setup_age_hours=168,
+                    max_setup_age_hours=age_limit,
                     fee_bps=fee_bps,
                     slippage_bps=slippage_bps,
                 )
@@ -549,11 +574,12 @@ def run_research(
     selected_threshold = 1.5 if selected_target == "swing" else 0.01
     selected_snaps = make_target_snapshots(snapshots, selected_target, fee_bps=fee_bps, slippage_bps=slippage_bps)
     test_start, test_end = hb._split_ranges(rows, 0.6, 0.2)["test"]
+    selected_age_limit = 24 if selected_filter == "age24" else 48 if selected_filter == "age48" else 72 if selected_filter in {"age72", "ema4h1d_rsi55_age72"} else 168
     selected_test_trades = simulate_filtered_slice(
         rows, selected_snaps, features, test_start, test_end,
         filter_name=selected_filter,
         minimum_net_rr=selected_threshold,
-        max_setup_age_hours=168,
+        max_setup_age_hours=selected_age_limit,
         fee_bps=fee_bps,
         slippage_bps=slippage_bps,
     )
@@ -614,7 +640,7 @@ def run_research(
         "limitations": [
             "70% is a research target, not a guarantee. A high win rate with too few trades or negative expectancy is not considered success.",
             "A fixed-R exit variant changes the formal strategy's exit target and is reported as experimental, not as the unchanged formal baseline.",
-            "The 20-trade grid is a controlled research set, but validation selection can still overfit; the holdout is evaluated only once for the selected candidate.",
+            "The predeclared entry-filter and exit-target grid is a controlled research set, but validation selection can still overfit; the holdout is evaluated only once for the selected candidate.",
             "Fees and slippage are assumptions and must be recalibrated to the exact venue and order type.",
             "This is a historical simulation, not investment advice or live trading.",
         ],
