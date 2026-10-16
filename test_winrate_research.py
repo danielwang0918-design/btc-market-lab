@@ -145,6 +145,19 @@ class WinRateResearchTests(unittest.TestCase):
         chosen, _ = wr._select_candidate(candidates, 8)
         self.assertEqual(chosen["filter"], "high-val-low-test")
 
+    def test_profitable_gate_requires_minimum_validation_sample(self):
+        candidate_row = {
+            "target_mode": "swing", "filter": "rsi55",
+            "train": {"trade_count": 40, "win_rate_percent": 70, "expectancy_r": 0.5, "profit_factor": 2},
+            "validation": {
+                "trade_count": 8, "win_rate_percent": 75,
+                "expectancy_r": 0.4, "profit_factor": 1.8,
+            },
+        }
+        selected, status = wr._select_candidate([candidate_row], 8)
+        self.assertEqual(status, "no_validation_candidate_passed_profitability_gate_exploratory_only")
+        self.assertEqual(selected["filter"], "rsi55")
+
     def test_filter_specs_are_unique_and_cover_the_no_filter_baseline(self):
         names = [name for name, _ in wr.FILTERS]
         self.assertEqual(len(names), len(set(names)))
