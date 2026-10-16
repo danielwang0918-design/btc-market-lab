@@ -76,6 +76,7 @@ def _position(
     return {
         "setup_id": f"agm-sma520-{int(rows[index]['open_time'])}",
         "target_event_id": f"agm-sma520-exit-{int(rows[index]['open_time'])}",
+        "signal_time_ms": entry_signal_time_ms,
         "side": "long",
         "signal_time_ms": entry_signal_time_ms,
         "entry_time_ms": int(rows[index]["open_time"]),
