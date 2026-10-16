@@ -54,9 +54,13 @@ def _trade_excursion(
 ) -> dict[str, Any]:
     if entry_index is None:
         return {
-            "mfe_r": None, "mae_r": None, "bars_with_both_stop_and_target_touched": None,
+            "mfe_r": None, "mae_r": None,
+            "mfe_r_before_exit_bar": None, "mae_r_before_exit_bar": None,
+            "bars_with_both_stop_and_target_touched": None,
             "entry_bar_range_atr": None, "entry_bar_body_fraction": None,
-            "entry_bar_close_location": None, "entry_bar_closed_against_direction": None,
+            "entry_bar_close_location": None,
+            "entry_bar_body_direction_against_trade": None,
+            "entry_bar_close_beyond_entry_against_trade": None,
         }
     entry = float(trade["raw_entry_price"])
     stop = float(trade["stop_price"])
@@ -69,9 +73,13 @@ def _trade_excursion(
     window = rows[entry_index:exit_index + 1]
     if not window or risk <= 0:
         return {
-            "mfe_r": None, "mae_r": None, "bars_with_both_stop_and_target_touched": None,
+            "mfe_r": None, "mae_r": None,
+            "mfe_r_before_exit_bar": None, "mae_r_before_exit_bar": None,
+            "bars_with_both_stop_and_target_touched": None,
             "entry_bar_range_atr": None, "entry_bar_body_fraction": None,
-            "entry_bar_close_location": None, "entry_bar_closed_against_direction": None,
+            "entry_bar_close_location": None,
+            "entry_bar_body_direction_against_trade": None,
+            "entry_bar_close_beyond_entry_against_trade": None,
         }
     highs = [float(row["high"]) for row in window]
     lows = [float(row["low"]) for row in window]
@@ -81,6 +89,18 @@ def _trade_excursion(
     else:
         mfe = (entry - min(lows)) / risk
         mae = (max(highs) - entry) / risk
+    prior_window = window[:-1]
+    if prior_window:
+        prior_highs = [float(row["high"]) for row in prior_window]
+        prior_lows = [float(row["low"]) for row in prior_window]
+        if side == "long":
+            mfe_before_exit = (max(prior_highs) - entry) / risk
+            mae_before_exit = (entry - min(prior_lows)) / risk
+        else:
+            mfe_before_exit = (entry - min(prior_lows)) / risk
+            mae_before_exit = (max(prior_highs) - entry) / risk
+    else:
+        mfe_before_exit = mae_before_exit = None
 
     both = 0
     for row in window:
@@ -100,17 +120,22 @@ def _trade_excursion(
     entry_bar_body_fraction = abs(close - op) / candle_range if candle_range > 0 else None
     close_location = (close - low) / candle_range if candle_range > 0 else None
     if candle_range <= 0:
-        adverse_close = None
+        adverse_body = None
+        adverse_vs_entry = None
     else:
-        adverse_close = close < op if side == "long" else close > op
+        adverse_body = close < op if side == "long" else close > op
+        adverse_vs_entry = close < entry if side == "long" else close > entry
     return {
         "mfe_r": round(mfe, 5),
         "mae_r": round(mae, 5),
+        "mfe_r_before_exit_bar": round(mfe_before_exit, 5) if mfe_before_exit is not None else None,
+        "mae_r_before_exit_bar": round(mae_before_exit, 5) if mae_before_exit is not None else None,
         "bars_with_both_stop_and_target_touched": both,
         "entry_bar_range_atr": None,
         "entry_bar_body_fraction": round(entry_bar_body_fraction, 5) if entry_bar_body_fraction is not None else None,
         "entry_bar_close_location": round(close_location, 5) if close_location is not None else None,
-        "entry_bar_closed_against_direction": adverse_close,
+        "entry_bar_body_direction_against_trade": adverse_body,
+        "entry_bar_close_beyond_entry_against_trade": adverse_vs_entry,
     }
 
 
@@ -129,8 +154,8 @@ def _primary_label(trade: dict[str, Any], flags: dict[str, bool]) -> str:
         return "higher_timeframe_ema_conflict"
     if flags.get("high_atr_at_entry", False):
         return "high_volatility_at_entry"
-    if flags.get("entry_bar_closed_against_direction", False):
-        return "entry_bar_closed_against_position"
+    if flags.get("entry_bar_body_direction_against_trade", False):
+        return "entry_bar_body_direction_against_trade"
     return "other_stop_or_loss"
 
 
@@ -221,7 +246,8 @@ def diagnose(
                 and excursion["bars_with_both_stop_and_target_touched"] > 0
                 and trade["exit_reason"] in {"stop", "stop_gap"}
             ),
-            "entry_bar_closed_against_direction": excursion.get("entry_bar_closed_against_direction") is True,
+            "entry_bar_body_direction_against_trade": excursion.get("entry_bar_body_direction_against_trade") is True,
+            "entry_bar_close_beyond_entry_against_trade": excursion.get("entry_bar_close_beyond_entry_against_trade") is True,
         }
         flags["entry_features_older_than_4h"] = feature_age_minutes is not None and feature_age_minutes > 240
         flags["profitable_trade"] = float(trade["r_multiple"]) > 0
@@ -253,7 +279,8 @@ def diagnose(
             "high_atr_at_entry",
             "stale_signal_24h_or_more",
             "same_bar_stop_target_ambiguity",
-            "entry_bar_closed_against_direction",
+            "entry_bar_body_direction_against_trade",
+            "entry_bar_close_beyond_entry_against_trade",
             "entry_features_older_than_4h",
         ]
         for flag in flag_names:
@@ -294,7 +321,7 @@ def diagnose(
             "indicator_timing": "Signal features use candles closed by signal timestamp. Entry features use the last candle fully closed at or before entry open; no unfinished entry candle is used for entry filters.",
             "atr_threshold": "75th percentile of ATR/price fitted on first 60% of chronological hourly feature rows only.",
             "primary_label_is_heuristic": True,
-            "warning": "Flags describe associations and path symptoms, not proven causal explanations. OHLC candles cannot reveal exact intrabar event order.",
+            "warning": "Flags describe associations and path symptoms, not proven causal explanations. Full-trade MFE/MAE include exit-bar OHLC and cannot reveal exact intrabar event order; separate before-exit-bar excursion fields exclude the exit candle.",
         },
         "training_75th_percentile_atr_pct": atr_cutoff,
         "split_summaries": summaries,
