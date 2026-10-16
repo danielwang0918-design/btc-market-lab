@@ -49,6 +49,7 @@ def _indicator_slice(feature: dict[str, Any] | None) -> dict[str, Any]:
 
 def _trade_excursion(
     rows: list[dict[str, Any]],
+    closes_plus_one: list[int],
     entry_index: int | None,
     trade: dict[str, Any],
 ) -> dict[str, Any]:
@@ -68,7 +69,7 @@ def _trade_excursion(
     side = trade["direction"]
     risk = abs(entry - stop)
     exit_ms = _epoch_ms(trade["exit_time_utc"])
-    exit_index = bisect.bisect_left([int(row["close_time"]) + 1 for row in rows], exit_ms)
+    exit_index = bisect.bisect_left(closes_plus_one, exit_ms)
     exit_index = min(max(exit_index, entry_index), len(rows) - 1)
     window = rows[entry_index:exit_index + 1]
     if not window or risk <= 0:
@@ -226,7 +227,7 @@ def diagnose(
             entry.get("atr_pct") is not None and atr_cutoff is not None
             and entry["atr_pct"] > atr_cutoff
         )
-        excursion = _trade_excursion(hourly, entry_index, trade)
+        excursion = _trade_excursion(hourly, closes_plus_one, entry_index, trade)
         if entry_index is not None and entry.get("atr14") is not None:
             entry_bar_range = float(hourly[entry_index]["high"]) - float(hourly[entry_index]["low"])
             excursion["entry_bar_range_atr"] = (
