@@ -40,6 +40,11 @@ FILTERS: tuple[tuple[str, str], ...] = (
 )
 TARGET_WIN_RATE = 70.0
 MIN_VALIDATION_TRADES_FOR_PROFITABILITY = 12
+ENTRY_MODES: tuple[tuple[str, str], ...] = (
+    ("touch", "Existing immediate entry on first eligible OB-zone touch."),
+    ("directional_close_next_open", "After the OB-zone touch, require a directional 1H candle close, then enter at the next 1H open."),
+    ("edge_reclaim_next_open", "After the OB-zone touch, require a directional 1H close beyond the far OB edge, then enter at the next 1H open."),
+)
 
 
 def _ema(values: list[float], period: int) -> list[float | None]:
@@ -308,6 +313,27 @@ def make_target_snapshots(
     return transformed
 
 
+def _entry_confirmation_passes(
+    entry_mode: str,
+    side: str,
+    bar: dict[str, Any],
+    zone_low: Decimal,
+    zone_high: Decimal,
+) -> bool:
+    if entry_mode == "touch":
+        return True
+    op = hb._number(bar["open"], "open", positive=True)
+    close = hb._number(bar["close"], "close", positive=True)
+    directional = close > op if side == "long" else close < op
+    if not directional:
+        return False
+    if entry_mode == "directional_close_next_open":
+        return True
+    if entry_mode == "edge_reclaim_next_open":
+        return close >= zone_high if side == "long" else close <= zone_low
+    raise ValueError(f"Unknown entry mode: {entry_mode}")
+
+
 def simulate_filtered_slice(
     rows: list[dict[str, Any]],
     snapshots: list[dict[str, Any]],
@@ -320,10 +346,13 @@ def simulate_filtered_slice(
     max_setup_age_hours: int,
     fee_bps: Decimal,
     slippage_bps: Decimal,
+    entry_mode: str = "touch",
+    target_mode: str = "swing",
 ) -> list[dict[str, Any]]:
-    """Same order/fill/exit rules as the formal simulator, with a causal filter only on new orders."""
+    """Same conservative order/exit rules, optionally waiting for a closed-candle confirmation."""
     trades: list[dict[str, Any]] = []
     pending: dict[str, Any] | None = None
+    confirmed_for_next_open: dict[str, Any] | None = None
     position: dict[str, Any] | None = None
     consumed_setups: set[str] = set()
     for index in range(start, end):
@@ -338,7 +367,50 @@ def simulate_filtered_slice(
                 ))
                 position = None
             pending = None
+            confirmed_for_next_open = None
         current_snapshot = snapshots[index]
+
+        if confirmed_for_next_open is not None:
+            candidate = confirmed_for_next_open
+            confirmed_for_next_open = None
+            if current_snapshot.get("integrity_ok"):
+                op = hb._number(bar["open"], "open", positive=True)
+                stop = hb._number(candidate["stop"], "stop", positive=True)
+                side = str(candidate["side"])
+                invalid_at_open = (side == "long" and op <= stop) or (side == "short" and op >= stop)
+                if not invalid_at_open:
+                    swing_target = hb._number(
+                        candidate.get("_original_target", candidate["target"]),
+                        "swing target", positive=True,
+                    )
+                    if target_mode == "swing":
+                        target = swing_target
+                    else:
+                        target_r = Decimal(target_mode.removesuffix("R"))
+                        risk_distance = abs(op - stop)
+                        proposed = (
+                            op + target_r * risk_distance if side == "long"
+                            else op - target_r * risk_distance
+                        )
+                        target = min(proposed, swing_target) if side == "long" else max(proposed, swing_target)
+                    favorable_target = target > op if side == "long" else target < op
+                    if favorable_target:
+                        rr_candidate = dict(candidate)
+                        rr_candidate["entry_reference"] = format(op, "f")
+                        actual_rr = _target_net_rr(rr_candidate, target, fee_bps, slippage_bps)
+                        if actual_rr >= Decimal(str(minimum_net_rr)):
+                            position = {
+                                "setup_id": candidate["setup_id"],
+                                "target_event_id": candidate["target_event_id"],
+                                "side": side,
+                                "signal_time_ms": int(candidate["signal_time_ms"]),
+                                "entry_time_ms": int(bar["open_time"]),
+                                "entry_index": index,
+                                "raw_entry": op,
+                                "stop": stop,
+                                "target": target,
+                            }
+
         if position:
             exit_result = hb._exit_on_bar(position, bar)
             if exit_result:
@@ -376,32 +448,40 @@ def simulate_filtered_slice(
                     if target_before_entry:
                         pending = None
                     elif zone_touch:
-                        position = {
-                            "setup_id": pending["setup_id"],
-                            "target_event_id": pending["target_event_id"],
-                            "side": side,
-                            "signal_time_ms": int(pending["signal_time_ms"]),
-                            "entry_time_ms": int(bar["open_time"]),
-                            "entry_index": index,
-                            "raw_entry": hb._number(pending["entry_reference"], "entry_reference", positive=True),
-                            "stop": stop,
-                            "target": target,
-                        }
-                        consumed_setups.add(pending["setup_id"])
-                        pending = None
-                        exit_result = hb._exit_on_bar(position, bar)
-                        if exit_result:
-                            raw_exit, reason = exit_result
-                            trades.append(hb._make_trade(
-                                position, raw_exit, int(bar["close_time"]) + 1,
-                                reason, index, fee_bps, slippage_bps,
-                            ))
-                            position = None
+                        if entry_mode == "touch":
+                            position = {
+                                "setup_id": pending["setup_id"],
+                                "target_event_id": pending["target_event_id"],
+                                "side": side,
+                                "signal_time_ms": int(pending["signal_time_ms"]),
+                                "entry_time_ms": int(bar["open_time"]),
+                                "entry_index": index,
+                                "raw_entry": hb._number(pending["entry_reference"], "entry_reference", positive=True),
+                                "stop": stop,
+                                "target": target,
+                            }
+                            consumed_setups.add(str(pending["setup_id"]))
+                            pending = None
+                            exit_result = hb._exit_on_bar(position, bar)
+                            if exit_result:
+                                raw_exit, reason = exit_result
+                                trades.append(hb._make_trade(
+                                    position, raw_exit, int(bar["close_time"]) + 1,
+                                    reason, index, fee_bps, slippage_bps,
+                                ))
+                                position = None
+                        else:
+                            setup_id = str(pending["setup_id"])
+                            consumed_setups.add(setup_id)
+                            if _entry_confirmation_passes(entry_mode, side, bar, zone_low, zone_high):
+                                confirmed_for_next_open = dict(pending)
+                            pending = None
                     elif (not hb._candidate_allowed(candidate_now, minimum_net_rr, max_setup_age_hours)
                           or candidate_now.get("setup_id") != pending.get("setup_id")):
                         pending = None
         candidate = current_snapshot.get("candidate")
-        if position is None and pending is None and current_snapshot.get("integrity_ok"):
+        if (position is None and pending is None and confirmed_for_next_open is None
+                and current_snapshot.get("integrity_ok")):
             if hb._candidate_allowed(candidate, minimum_net_rr, max_setup_age_hours):
                 if candidate and entry_filter_passes(filter_name, candidate, features[index]):
                     setup_id = str(candidate["setup_id"])
@@ -563,6 +643,7 @@ def run_research(
                 split_metrics[split_name] = _metrics(trades)
             candidates.append({
                 "target_mode": target_mode,
+                "entry_mode": "touch",
                 "filter": filter_name,
                 "filter_description": description,
                 "train": split_metrics["train"],
@@ -571,9 +652,54 @@ def run_research(
                 "eligible_for_selection": split_metrics["validation"]["trade_count"] >= minimum_validation_trades,
             })
 
+    confirmation_filters = {"none", "ema4h1d_position", "rsi55", "original_rr25", "relative_volume12"}
+    for target_mode in TARGETS:
+        target_snaps = make_target_snapshots(
+            snapshots, target_mode, fee_bps=fee_bps, slippage_bps=slippage_bps
+        )
+        filter_threshold = 1.5 if target_mode == "swing" else 0.01
+        bounds = hb._split_ranges(rows, 0.6, 0.2)
+        for entry_mode, entry_description in ENTRY_MODES[1:]:
+            for filter_name, description in FILTERS:
+                if filter_name not in confirmation_filters:
+                    continue
+                split_metrics: dict[str, Any] = {}
+                age_limit = (
+                    24 if filter_name == "age24"
+                    else 48 if filter_name == "age48"
+                    else 72 if filter_name in {"age72", "ema4h1d_rsi55_age72"}
+                    else 168
+                )
+                for split_name, (start, end) in bounds.items():
+                    if split_name == "test":
+                        continue
+                    trades = simulate_filtered_slice(
+                        rows, target_snaps, features, start, end,
+                        filter_name=filter_name,
+                        minimum_net_rr=filter_threshold,
+                        max_setup_age_hours=age_limit,
+                        fee_bps=fee_bps,
+                        slippage_bps=slippage_bps,
+                        entry_mode=entry_mode,
+                        target_mode=target_mode,
+                    )
+                    split_metrics[split_name] = _metrics(trades)
+                candidates.append({
+                    "target_mode": target_mode,
+                    "entry_mode": entry_mode,
+                    "filter": filter_name,
+                    "filter_description": description,
+                    "entry_mode_description": entry_description,
+                    "train": split_metrics["train"],
+                    "validation": split_metrics["validation"],
+                    "test_was_used_for_selection": False,
+                    "eligible_for_selection": split_metrics["validation"]["trade_count"] >= minimum_validation_trades,
+                })
+
     selected, selection_status = _select_candidate(candidates, minimum_validation_trades)
     selected_target = selected["target_mode"]
     selected_filter = selected["filter"]
+    selected_entry_mode = selected.get("entry_mode", "touch")
     selected_threshold = 1.5 if selected_target == "swing" else 0.01
     selected_snaps = make_target_snapshots(snapshots, selected_target, fee_bps=fee_bps, slippage_bps=slippage_bps)
     test_start, test_end = hb._split_ranges(rows, 0.6, 0.2)["test"]
@@ -585,6 +711,8 @@ def run_research(
         max_setup_age_hours=selected_age_limit,
         fee_bps=fee_bps,
         slippage_bps=slippage_bps,
+        entry_mode=selected_entry_mode,
+        target_mode=selected_target,
     )
     selected_test = _metrics(selected_test_trades)
     baseline_test = baseline["splits"]["test"]["metrics"]
@@ -629,6 +757,8 @@ def run_research(
         "selection": {
             "status": selection_status,
             "selected_target_mode": selected_target,
+            "selected_entry_mode": selected_entry_mode,
+            "selected_entry_mode_description": next(description for name, description in ENTRY_MODES if name == selected_entry_mode),
             "selected_filter": selected_filter,
             "selected_filter_description": next(desc for name, desc in FILTERS if name == selected_filter),
             "selected_train_metrics": selected["train"],
@@ -657,6 +787,7 @@ def run_research(
         "baseline_test": baseline_test,
         "selection_status": selection_status,
         "selected_target_mode": selected_target,
+        "selected_entry_mode": selected_entry_mode,
         "selected_filter": selected_filter,
         "selected_validation": selected["validation"],
         "selected_test": selected_test,
