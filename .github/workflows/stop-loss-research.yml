@@ -18,7 +18,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: btc-stop-loss-research-${{ github.event.pull_request.number || github.ref }}
+  group: btc-stop-loss-research
   cancel-in-progress: true
 
 jobs:
@@ -57,7 +57,6 @@ jobs:
           import json
           import os
           from pathlib import Path
-
           report_path = Path("data/historical/BTCUSDT_stop_loss_research.json")
           summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
           if not report_path.exists():
@@ -67,7 +66,6 @@ jobs:
                   with open(summary_path, "a", encoding="utf-8") as stream:
                       stream.write("# BTC stop-loss comparison\n\n" + message + "\n")
               raise SystemExit(0)
-
           report = json.loads(report_path.read_text(encoding="utf-8"))
           lines = [
               "# BTCUSDT stop-loss comparison", "",
@@ -75,7 +73,7 @@ jobs:
               f'- Strategy: {report["strategy"]}; 10 bps fee + 5 bps slippage each side.',
               f'- Fixed rules: minimum net RR {report["parameters"]["minimum_net_rr_after_costs"]}; setup age <= {report["parameters"]["maximum_setup_age_hours"]} hours.',
               f'- Wider-stop buffer: {report["parameters"]["atr_buffer_multiple"]} x closed 4H ATR(14).',
-              "- Entry and target rules are kept fixed. Wider-stop variants must still satisfy the minimum net RR after costs.",
+              "- Entry and target rules are kept fixed. Wider-stop variants must still satisfy minimum net RR after costs.",
               "- Only closed 4H candles and already-confirmed 4H swing points are used.", "",
               "## Main comparison", "",
               "| Variant | Split | Trades | Win rate (%) | Expectancy (R) | Profit factor | Max DD (R) | Avg stop distance (%) | Stops within 2 bars / all stops (%) |",
@@ -109,7 +107,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: BTCUSDT-stop-loss-research-${{ github.run_id }}
+          name: BTCUSDT-stop-loss-research
           path: |
             data/historical/BTCUSDT_1d.csv
             data/historical/BTCUSDT_4h.csv
