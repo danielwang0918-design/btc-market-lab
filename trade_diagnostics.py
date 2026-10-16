@@ -199,6 +199,12 @@ def diagnose(
             and entry["atr_pct"] > atr_cutoff
         )
         excursion = _trade_excursion(hourly, entry_index, trade)
+        if entry_index is not None and entry.get("atr14") is not None:
+            entry_bar_range = float(hourly[entry_index]["high"]) - float(hourly[entry_index]["low"])
+            excursion["entry_bar_range_atr"] = (
+                round(entry_bar_range / float(entry["atr14"]), 5)
+                if float(entry["atr14"]) > 0 else None
+            )
         flags = {
             "rapid_stop_within_2_bars": trade["exit_reason"] in {"stop", "stop_gap"} and int(trade["bars_held"]) <= 2,
             "directional_rsi_exhaustion_at_signal": (
@@ -236,7 +242,6 @@ def diagnose(
     all_splits = sorted({str(trade.get("split", "all")) for trade in diagnostic_rows})
     for split in all_splits:
         subset = [row for row in diagnostic_rows if str(row.get("split", "all")) == split]
-        wins = [row for row in subset if row["flags_for_summary"] if False]
         loss_rows = [row for row in subset if row["diagnostic_flags"]["losing_trade"]]
         flag_summary = {}
         flag_names = [
