@@ -96,6 +96,8 @@ jobs:
               "",
               f'- Selection status: {selection["status"]}',
               f'- Target mode: {selection["selected_target_mode"]}',
+              f'- Entry confirmation: {selection["selected_entry_mode"]}',
+              f'- Entry confirmation definition: {selection["selected_entry_mode_description"]}',
               f'- Entry filter: {selection["selected_filter"]}',
               f'- Filter definition: {selection["selected_filter_description"]}',
               "",
@@ -113,13 +115,13 @@ jobs:
               "",
               "The candidate grid contains training and validation metrics only; no test metrics are used to rank candidates.",
               "",
-              "| Target | Filter | Validation trades | Validation win rate (%) | Expectancy (R) | Profit factor |",
-              "|---|---|---:|---:|---:|---:|",
+              "| Target | Entry mode | Filter | Validation trades | Validation win rate (%) | Expectancy (R) | Profit factor |",
+              "|---|---|---|---:|---:|---:|---:|",
           ]
           for candidate in report["candidates"][:15]:
               v = candidate["validation"]
               lines.append(
-                  f'| {candidate["target_mode"]} | {candidate["filter"]} | {v["trade_count"]} | '
+                  f'| {candidate["target_mode"]} | {candidate.get("entry_mode", "touch")} | {candidate["filter"]} | {v["trade_count"]} | '
                   f'{v["win_rate_percent"]} | {v["expectancy_r"]} | {v["profit_factor"]} |'
               )
 
