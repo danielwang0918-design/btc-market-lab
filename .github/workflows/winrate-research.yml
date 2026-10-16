@@ -1,0 +1,239 @@
+name: BTC win-rate research
+
+on:
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "winrate_research.py"
+      - "test_winrate_research.py"
+      - "historical_backtest.py"
+      - "market_research.py"
+      - "market_structure.py"
+      - "binance_market_data.py"
+      - ".github/workflows/winrate-research.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: win-rate-research-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  win-rate-study:
+    name: Download data and test entry filters / exit targets
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Run unit tests
+        run: python -m unittest -v
+
+      - name: Download Binance Spot history
+        run: python -u historical_backtest.py download-all BTCUSDT
+
+      - name: Research predefined filters and target variants
+        run: >-
+          python -u winrate_research.py BTCUSDT
+          --fee-bps-per-side 10
+          --slippage-bps-per-side 5
+          --minimum-validation-trades 8
+
+      - name: Diagnose every baseline trade
+        if: always()
+        run: >-
+          python -u trade_diagnostics.py BTCUSDT
+          --data-dir data/historical
+
+      - name: Publish a readable run summary
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          path = Path("data/historical/BTCUSDT_winrate_research.json")
+          summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+          if not path.exists():
+              message = "Win-rate research report was not produced. Inspect the earlier failed step."
+              print(message)
+              if summary_path:
+                  with open(summary_path, "a", encoding="utf-8") as stream:
+                      stream.write("# BTC win-rate research\n\n" + message + "\n")
+              raise SystemExit(0)
+
+          report = json.loads(path.read_text(encoding="utf-8"))
+          baseline = report["baseline"]
+          selection = report["selection"]
+          diagnostic_path = Path("data/historical/BTCUSDT_trade_diagnostics.json")
+          diagnostics = json.loads(diagnostic_path.read_text(encoding="utf-8")) if diagnostic_path.exists() else None
+          selected_diagnostic_path = Path("data/historical/BTCUSDT_selected_test_diagnostics.json")
+          selected_diagnostics = json.loads(selected_diagnostic_path.read_text(encoding="utf-8")) if selected_diagnostic_path.exists() else None
+
+          def row(name, metrics):
+              return (
+                  f'| {name} | {metrics["trade_count"]} | {metrics["win_rate_percent"]} | '
+                  f'{metrics["expectancy_r"]} | {metrics["profit_factor"]} | {metrics["max_drawdown_r"]} |'
+              )
+
+          lines = [
+              "# BTCUSDT win-rate research",
+              "",
+              "Research target: 70% win rate. This is not assumed or guaranteed.",
+              "",
+              "## Formal strategy baseline",
+              "",
+              "Strategy: mtf-bos-ob-retest-v1; original swing target and stop rules; 10 bps fee and 5 bps slippage per side.",
+              "",
+              "| Split | Trades | Win rate (%) | Expectancy (R) | Profit factor | Max drawdown (R) |",
+              "|---|---:|---:|---:|---:|---:|",
+          ]
+          for split in ("train", "validation", "test"):
+              lines.append(row(split, baseline["splits"][split]["metrics"]))
+
+          lines += [
+              "",
+              "## Validation-selected candidate (only this variant is evaluated on test)",
+              "",
+              f'- Selection status: {selection["status"]}',
+              f'- Target mode: {selection["selected_target_mode"]}',
+              f'- Entry confirmation: {selection["selected_entry_mode"]}',
+              f'- Entry confirmation definition: {selection["selected_entry_mode_description"]}',
+              f'- Entry filter: {selection["selected_filter"]}',
+              f'- Filter definition: {selection["selected_filter_description"]}',
+              "",
+              "| Split | Trades | Win rate (%) | Expectancy (R) | Profit factor | Max drawdown (R) |",
+              "|---|---:|---:|---:|---:|---:|",
+              row("train", selection["selected_train_metrics"]),
+              row("validation", selection["selected_validation_metrics"]),
+              row("selected test", selection["selected_test_metrics"]),
+              "",
+              f'- Test win-rate point estimate at least 70%: {selection["test_win_rate_point_estimate_at_least_70_percent"]}',
+              f'- Test has at least 20 trades: {selection["test_sample_at_least_20_trades"]}',
+              f'- Test meets win-rate and profitability gate: {selection["test_meets_win_rate_and_profitability_gate"]}',
+              "",
+              "## Validation ranking",
+              "",
+              "The candidate grid contains training and validation metrics only; no test metrics are used to rank candidates.",
+              "",
+              "| Target | Entry mode | Filter | Validation trades | Validation win rate (%) | Expectancy (R) | Profit factor |",
+              "|---|---|---|---:|---:|---:|---:|",
+          ]
+          for candidate in report["candidates"][:15]:
+              v = candidate["validation"]
+              lines.append(
+                  f'| {candidate["target_mode"]} | {candidate.get("entry_mode", "touch")} | {candidate["filter"]} | {v["trade_count"]} | '
+                  f'{v["win_rate_percent"]} | {v["expectancy_r"]} | {v["profit_factor"]} |'
+              )
+
+          if diagnostics:
+              lines += [
+                  "",
+                  "## Trade-by-trade failure diagnostics",
+                  "",
+                  f'- Training-only ATR/price 75th percentile: {diagnostics["training_75th_percentile_atr_pct"]}',
+                  "",
+                  "| Split | Trades | Wins | Losses | Win rate (%) | Expectancy (R) |",
+                  "|---|---:|---:|---:|---:|---:|",
+              ]
+              for split in ("train", "validation", "test"):
+                  item = diagnostics["split_summaries"].get(split)
+                  if item:
+                      lines.append(
+                          f'| {split} | {item["trade_count"]} | {item["win_count"]} | {item["loss_count"]} | '
+                          f'{item["win_rate_percent"]} | {item["expectancy_r"]} |'
+                      )
+              test_diag = diagnostics["split_summaries"].get("test", {})
+              failure_flags = test_diag.get("failure_flags", {})
+              top_flags = sorted(
+                  failure_flags.items(),
+                  key=lambda item: item[1]["percent_of_losses_with_flag"],
+                  reverse=True,
+              )[:8]
+              lines += [
+                  "",
+                  "### Most common observed flags on test-set losses",
+                  "",
+                  "| Observed flag | Losing trades with flag | Percent of test losses | Win rate when flagged (%) |",
+                  "|---|---:|---:|---:|",
+              ]
+              for flag, detail in top_flags:
+                  lines.append(
+                      f'| {flag} | {detail["flagged_loss_count"]} | '
+                      f'{detail["percent_of_losses_with_flag"]} | {detail["flagged_win_rate_percent"]} |'
+                  )
+              lines += [
+                  "",
+                  "Flags are diagnostic associations, not proof of causality; each trade's entry/exit path and indicator context are in the artifact JSON/CSV.",
+              ]
+
+          if selected_diagnostics:
+              item = selected_diagnostics["split_summaries"].get("test", {})
+              lines += [
+                  "",
+                  "### Selected candidate: test-set failure analysis",
+                  "",
+                  f'- Selected-candidate trades: {item.get("trade_count", 0)}',
+                  f'- Selected-candidate losses: {item.get("loss_count", 0)}',
+                  f'- Selected-candidate win rate: {item.get("win_rate_percent", 0)}%',
+                  f'- Selected-candidate expectancy: {item.get("expectancy_r", 0)}R',
+                  "",
+                  "| Observed flag | Losing test trades with flag | Percent of selected losses |",
+                  "|---|---:|---:|",
+              ]
+              selected_flags = item.get("failure_flags", {})
+              for flag, detail in sorted(
+                  selected_flags.items(),
+                  key=lambda pair: pair[1]["percent_of_losses_with_flag"],
+                  reverse=True,
+              )[:8]:
+                  lines.append(
+                      f'| {flag} | {detail["flagged_loss_count"]} | '
+                      f'{detail["percent_of_losses_with_flag"]} |'
+                  )
+              lines += [
+                  "",
+                  "The selected-candidate test is evaluated after validation-based selection; its results are not used to modify that candidate retroactively.",
+              ]
+
+          lines += [
+              "",
+              "## Interpretation",
+              "",
+              "- A high win rate with too few trades or negative expectancy is not evidence of a useful strategy.",
+              "- The final test is run only for the selected candidate and the fixed baseline.",
+              "- All results are historical simulations; no account access or orders are involved.",
+          ]
+          text = "\n".join(lines) + "\n"
+          print(text)
+          if summary_path:
+              with open(summary_path, "a", encoding="utf-8") as stream:
+                  stream.write(text)
+          PY
+
+      - name: Upload history and research reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: BTCUSDT-winrate-research-${{ github.run_id }}
+          path: |
+            data/historical/BTCUSDT_1d.csv
+            data/historical/BTCUSDT_4h.csv
+            data/historical/BTCUSDT_1h.csv
+            data/historical/BTCUSDT_mtf_backtest.json
+            data/historical/BTCUSDT_winrate_research.json
+            data/historical/BTCUSDT_trade_diagnostics.json
+            data/historical/BTCUSDT_trade_diagnostics.csv
+            data/historical/BTCUSDT_selected_test_diagnostics.json
+            data/historical/BTCUSDT_selected_test_diagnostics.csv
+          if-no-files-found: warn
+          retention-days: 30

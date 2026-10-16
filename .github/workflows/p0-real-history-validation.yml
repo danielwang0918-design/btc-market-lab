@@ -1,0 +1,177 @@
+name: P0 real-history validation
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  historical-validation:
+    name: Download, backtest, and tune BTCUSDT
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Run unit tests
+        run: python -m unittest -v
+
+      - name: Download full Binance Spot history
+        run: python -u historical_backtest.py download-all BTCUSDT
+
+      - name: Run the predefined formal MTF baseline
+        run: >-
+          python -u historical_backtest.py backtest BTCUSDT
+          --fee-bps-per-side 10
+          --slippage-bps-per-side 5
+          --minimum-net-rr 1.5
+          --max-setup-age-hours 168
+
+      - name: Compare predefined parameters using validation only
+        run: >-
+          python -u historical_backtest.py tune BTCUSDT
+          --rr-grid 1.25,1.5,1.75,2.0
+          --age-grid 72,168,240
+          --fee-bps-per-side 10
+          --slippage-bps-per-side 5
+
+      - name: Verify historical reports and write run summary
+        if: always()
+        run: |
+          python - <<'PY'
+          import csv
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path("data/historical")
+          expected = {
+              "1d": 1000,
+              "4h": 10000,
+              "1h": 50000,
+          }
+          coverage = {}
+          for interval, minimum_rows in expected.items():
+              path = root / f"BTCUSDT_{interval}.csv"
+              if not path.exists():
+                  raise SystemExit(f"Missing historical dataset: {path}")
+              with path.open(newline="", encoding="utf-8-sig") as stream:
+                  rows = list(csv.DictReader(stream))
+              if len(rows) < minimum_rows:
+                  raise SystemExit(
+                      f"{interval} history is incomplete for this validation: "
+                      f"{len(rows)} candles; expected at least {minimum_rows}."
+                  )
+              if any(row.get("is_closed") != "true" for row in rows):
+                  raise SystemExit(f"{interval} file contains a non-closed candle.")
+              coverage[interval] = {
+                  "candles": len(rows),
+                  "start": rows[0]["open_time_utc"],
+                  "end": rows[-1]["close_time_utc"],
+              }
+
+          base_path = root / "BTCUSDT_mtf_backtest.json"
+          tune_path = root / "BTCUSDT_mtf_tuning.json"
+          if not base_path.exists() or not tune_path.exists():
+              raise SystemExit("Backtest or tuning report was not produced.")
+
+          base = json.loads(base_path.read_text(encoding="utf-8"))
+          tuning = json.loads(tune_path.read_text(encoding="utf-8"))
+          if base.get("data", {}).get("strategy") != "mtf-bos-ob-retest-v1":
+              raise SystemExit("Baseline report does not identify the formal MTF strategy.")
+
+          def fmt(value):
+              if value == "infinite":
+                  return "infinite"
+              if value is None:
+                  return "N/A"
+              return f"{value}"
+
+          lines = [
+              "# BTCUSDT P0 real-history validation",
+              "",
+              "> Historical simulation only. No account access or orders. Fee/slippage assumptions are 10/5 bps per side.",
+              "",
+              "## Downloaded closed-candle history",
+              "",
+              "| Interval | Closed candles | First candle (UTC) | Last candle (UTC) |",
+              "|---|---:|---|---|",
+          ]
+          for interval in ("1d", "4h", "1h"):
+              item = coverage[interval]
+              lines.append(f'| {interval} | {item["candles"]:,} | {item["start"]} | {item["end"]} |')
+
+          lines += [
+              "",
+              "## Baseline backtest",
+              "",
+              "Strategy: mtf-bos-ob-retest-v1; minimum net RR 1.5; maximum setup age 168 hours.",
+              "",
+              "| Split | Trades | Win rate (%) | Expectancy (R) | Profit factor | Max drawdown (R) |",
+              "|---|---:|---:|---:|---:|---:|",
+          ]
+          for split in ("train", "validation", "test"):
+              metrics = base["splits"][split]["metrics"]
+              lines.append(
+                  f'| {split} | {metrics["trade_count"]} | {metrics["win_rate_percent"]} | '
+                  f'{metrics["expectancy_r"]} | {fmt(metrics["profit_factor"])} | {metrics["max_drawdown_r"]} |'
+              )
+
+          lines += [
+              "",
+              "## Parameter search",
+              "",
+              f'- Selection status: {tuning["tuning"]["selection_status"]}',
+              f'- Selected parameters: {json.dumps(tuning["tuning"]["selected_parameters"], ensure_ascii=False)}',
+              f'- Validation expectancy positive: {tuning["tuning"]["selected_validation_expectancy_positive"]}',
+          ]
+          selected = tuning.get("selected_configuration")
+          if selected:
+              lines += [
+                  "",
+                  "| Selected configuration test split | Trades | Win rate (%) | Expectancy (R) | Profit factor | Max drawdown (R) |",
+                  "|---|---:|---:|---:|---:|---:|",
+              ]
+              metrics = selected["splits"]["test"]["metrics"]
+              lines.append(
+                  f'| test | {metrics["trade_count"]} | {metrics["win_rate_percent"]} | '
+                  f'{metrics["expectancy_r"]} | {fmt(metrics["profit_factor"])} | {metrics["max_drawdown_r"]} |'
+              )
+
+          lines += [
+              "",
+              "## Interpretation notes",
+              "",
+              "- Validation data selects parameters; test data is not used to rank candidate configurations.",
+              "- A non-positive validation expectancy or insufficient validation trades is not evidence of a profitable edge.",
+              "- Results depend on the stated fee/slippage assumptions and conservative OHLC fill rules; they do not guarantee future performance.",
+              "",
+              "Full datasets and JSON trade-level reports are attached to this workflow run as an artifact.",
+          ]
+          summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+          if summary_path:
+              with open(summary_path, "a", encoding="utf-8") as stream:
+                  stream.write("\n".join(lines) + "\n")
+          print("\n".join(lines))
+          PY
+
+      - name: Upload historical data and research reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: BTCUSDT-p0-real-history-${{ github.run_id }}
+          path: |
+            data/historical/BTCUSDT_1d.csv
+            data/historical/BTCUSDT_4h.csv
+            data/historical/BTCUSDT_1h.csv
+            data/historical/BTCUSDT_mtf_backtest.json
+            data/historical/BTCUSDT_mtf_tuning.json
+          if-no-files-found: warn
+          retention-days: 30

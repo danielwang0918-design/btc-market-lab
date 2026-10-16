@@ -113,13 +113,46 @@ python3 market_research.py journal ANALYSIS_ID \
 
 復盤 JSONL 保存在 `research/trade_reviews/reviews.jsonl`，會比較計畫與實際進出場、實際費用、費用假設及損益。只有原分析含有效方向與止損時才計算實際 R；分母使用實際平均進場至原計畫止損的價格風險乘數量，實際費用扣在損益分子。復盤筆記只供日後查看，不會自動調整策略，也不統計或宣稱勝率、績效。所有 `research/` 和個人設定都留在本機並列入忽略清單。
 
+## P0：歷史資料下載、正式策略回測與參數比較
+
+歷史研究使用 `historical_backtest.py`。它可分頁下載 Binance 現貨歷史 K 線，支援 `1d`、`4h`、`1h`，保留資料缺口；預設歷史起點為 BTC 現貨的 `2017-08-17`。首次下載： 歷史資料請求使用 Binance 官方公開市場資料主機 `data-api.binance.vision`，避開一般 API 主機在部分執行環境回傳地區限制的情形；這只提供公開行情，不需要 API Key。
+
+```bash
+python3 historical_backtest.py download-all BTCUSDT
+```
+
+之後再次執行同一命令會依各 CSV 最後一根已存 K 線增量更新。檔案存在於 `data/historical/`；若要明確重抓日期範圍，可加入 `--start YYYY-MM-DD --end YYYY-MM-DD`。下載器不填補或插值缺漏 K 線。
+
+以現有正式策略 `mtf-bos-ob-retest-v1` 執行單組參數回測：
+
+```bash
+python3 historical_backtest.py backtest BTCUSDT \
+  --fee-bps-per-side 10 --slippage-bps-per-side 5 \
+  --minimum-net-rr 1.5 --max-setup-age-hours 168
+```
+
+比較一組事先指定的最低淨 RR 與 OB 有效時間：
+
+```bash
+python3 historical_backtest.py tune BTCUSDT \
+  --rr-grid 1.25,1.5,1.75,2.0 \
+  --age-grid 72,168,240 \
+  --fee-bps-per-side 10 --slippage-bps-per-side 5
+```
+
+回測從每個 1H 收盤後可見的 `1d/4h/1h` 資料建立訊號；每個週期最多使用最近 200 根已收盤 K 線，並沿用三週期 BOS 同向、1H 未回測 OB、OB 外緣止損、最近未被觸及的已確認波段目標，以及成本後最低淨 RR 的現有規則。掛單只在訊號形成的下一根 1H K 線起生效；候選 OB 在有效時間內等待回踩。遇到 1H 缺口、資料完整性檢核失敗或切分邊界時，不會讓交易穿越未知資料或測試區間。
+
+`tune` 預設比較 12 組 RR/OB 有效時間組合。費率及滑價不參與最佳化，而是固定為明示假設。參數只按 validation 區間的期望 R、Profit Factor 與交易數排序；test 區間不參與選參數。若 validation 交易數不足，報告會使用明示的 fallback 並標示資料不足；即使成功選出參數，若 validation 期望值不為正，也不應宣稱已有策略優勢。參數網格是研究候選，不會修改本機 `.market-lab/strategy.json`，也不會自動下單。
+
+結果預設儲存為 `data/historical/BTCUSDT_mtf_backtest.json` 或 `data/historical/BTCUSDT_mtf_tuning.json`，包含資料涵蓋範圍、缺口、各切分績效及逐筆交易。請先查看驗證集是否足夠，再將鎖定測試集結果當作一次性的樣本外檢查。
+
 ## 測試
 
 ```bash
 python3 -m unittest -v
 ```
 
-測試使用本機 mock、fixture 和明確標記的合成資料，涵蓋擷取、K 線完整性及缺口分段、已收盤 K 線、未來資料隔離、事件證據、策略設定、候選與不交易狀態、多空成本後風險報酬、報價新鮮度、缺口阻擋、人工紀錄與復盤。測試資料不代表真實行情，也不呼叫即時 Binance API。
+測試使用本機 mock、fixture 和明確標記的合成資料，涵蓋擷取、K 線完整性及缺口分段、已收盤 K 線、未來資料隔離、事件證據、策略設定、候選與不交易狀態、多空成本後風險報酬、報價新鮮度、缺口阻擋、人工紀錄與復盤。測試資料不代表真實行情，也不呼叫即時 Binance API。 新增的歷史回測測試也使用合成 K 線驗證因果事件、掛單/出場、同根停損優先、切分邊界及調參隔離；不代表已完成整段真實行情回測。
 
 ## 限制
 
