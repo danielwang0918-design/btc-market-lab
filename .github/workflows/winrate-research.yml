@@ -76,6 +76,8 @@ jobs:
           selection = report["selection"]
           diagnostic_path = Path("data/historical/BTCUSDT_trade_diagnostics.json")
           diagnostics = json.loads(diagnostic_path.read_text(encoding="utf-8")) if diagnostic_path.exists() else None
+          selected_diagnostic_path = Path("data/historical/BTCUSDT_selected_test_diagnostics.json")
+          selected_diagnostics = json.loads(selected_diagnostic_path.read_text(encoding="utf-8")) if selected_diagnostic_path.exists() else None
 
           def row(name, metrics):
               return (
@@ -174,6 +176,35 @@ jobs:
                   "Flags are diagnostic associations, not proof of causality; each trade's entry/exit path and indicator context are in the artifact JSON/CSV.",
               ]
 
+          if selected_diagnostics:
+              item = selected_diagnostics["split_summaries"].get("test", {})
+              lines += [
+                  "",
+                  "### Selected candidate: test-set failure analysis",
+                  "",
+                  f'- Selected-candidate trades: {item.get("trade_count", 0)}',
+                  f'- Selected-candidate losses: {item.get("loss_count", 0)}',
+                  f'- Selected-candidate win rate: {item.get("win_rate_percent", 0)}%',
+                  f'- Selected-candidate expectancy: {item.get("expectancy_r", 0)}R',
+                  "",
+                  "| Observed flag | Losing test trades with flag | Percent of selected losses |",
+                  "|---|---:|---:|",
+              ]
+              selected_flags = item.get("failure_flags", {})
+              for flag, detail in sorted(
+                  selected_flags.items(),
+                  key=lambda pair: pair[1]["percent_of_losses_with_flag"],
+                  reverse=True,
+              )[:8]:
+                  lines.append(
+                      f'| {flag} | {detail["flagged_loss_count"]} | '
+                      f'{detail["percent_of_losses_with_flag"]} |'
+                  )
+              lines += [
+                  "",
+                  "The selected-candidate test is evaluated after validation-based selection; its results are not used to modify that candidate retroactively.",
+              ]
+
           lines += [
               "",
               "## Interpretation",
@@ -202,5 +233,7 @@ jobs:
             data/historical/BTCUSDT_winrate_research.json
             data/historical/BTCUSDT_trade_diagnostics.json
             data/historical/BTCUSDT_trade_diagnostics.csv
+            data/historical/BTCUSDT_selected_test_diagnostics.json
+            data/historical/BTCUSDT_selected_test_diagnostics.csv
           if-no-files-found: warn
           retention-days: 30
