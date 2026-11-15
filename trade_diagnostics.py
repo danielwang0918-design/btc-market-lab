@@ -1,395 +1,195 @@
 #!/usr/bin/env python3
-"""Per-trade post-mortem for the formal BTC multi-timeframe backtest."""
+"""Per-trade excursion and higher-timeframe context diagnostics for BTC MTF backtests."""
 from __future__ import annotations
-
-import argparse
-import bisect
-import csv
-import json
-import math
-from collections import Counter
-from datetime import datetime
+import argparse, bisect, csv, json
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import historical_backtest as hb
-import winrate_research as wr
 
-INDICATOR_FIELDS = (
-    "1h_ema_position", "1h_ema_slope",
-    "4h_ema_position", "4h_ema_slope",
-    "1d_ema_position", "1d_ema_slope",
-    "rsi14", "atr14", "atr_pct", "relative_volume20",
-)
+def _read_csv(path: Path) -> list[dict[str, str]]:
+    with path.open("r", encoding="utf-8-sig", newline="") as stream:
+        return list(csv.DictReader(stream))
 
 
-def _epoch_ms(value: str) -> int:
+def _ms(value: str) -> int:
     parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
     return int(parsed.timestamp() * 1000)
 
 
-def _finite(value: Any) -> bool:
-    return isinstance(value, (int, float)) and math.isfinite(float(value))
+def _ema20_by_segment(rows: list[dict[str, str]], interval_ms: int) -> list[float | None]:
+    output: list[float | None] = [None] * len(rows)
+    start = 0
+    while start < len(rows):
+        end = start + 1
+        while end < len(rows) and int(rows[end]["open_time"]) - int(rows[end - 1]["open_time"]) == interval_ms:
+            end += 1
+        closes = [float(row["close"]) for row in rows[start:end]]
+        if len(closes) >= 20:
+            value = sum(closes[:20]) / 20
+            output[start + 19] = value
+            alpha = 2.0 / 21.0
+            for offset in range(20, len(closes)):
+                value = alpha * closes[offset] + (1.0 - alpha) * value
+                output[start + offset] = value
+        start = end
+    return output
 
 
-def _direction_aligned(value: Any, direction: str) -> bool | None:
-    if not _finite(value):
-        return None
-    return float(value) > 0 if direction == "long" else float(value) < 0
-
-
-def _indicator_slice(feature: dict[str, Any] | None) -> dict[str, Any]:
-    if not feature:
-        return {key: None for key in INDICATOR_FIELDS}
+def _context_at(rows: list[dict[str, str]], ema: list[float | None],
+                close_after: list[int], asof_ms: int) -> dict[str, Any]:
+    index = bisect.bisect_right(close_after, asof_ms) - 1
+    if index < 0:
+        return {"close": None, "ema20": None, "position_pct": None, "slope_pct_3bars": None}
+    close, value = float(rows[index]["close"]), ema[index]
+    old = ema[index - 3] if index >= 3 else None
     return {
-        key: (float(feature[key]) if _finite(feature.get(key)) else None)
-        for key in INDICATOR_FIELDS
+        "close": close, "ema20": value,
+        "position_pct": round((close / value - 1) * 100, 6) if value else None,
+        "slope_pct_3bars": round((value / old - 1) * 100, 6) if value and old else None,
+        "candle_close_utc": rows[index]["close_time_utc"],
     }
 
 
-def _trade_excursion(
-    rows: list[dict[str, Any]],
-    closes_plus_one: list[int],
-    entry_index: int | None,
-    trade: dict[str, Any],
-) -> dict[str, Any]:
-    if entry_index is None:
-        return {
-            "mfe_r": None, "mae_r": None,
-            "mfe_r_before_exit_bar": None, "mae_r_before_exit_bar": None,
-            "bars_with_both_stop_and_target_touched": None,
-            "entry_bar_range_atr": None, "entry_bar_body_fraction": None,
-            "entry_bar_close_location": None,
-            "entry_bar_body_direction_against_trade": None,
-            "entry_bar_close_beyond_entry_against_trade": None,
-        }
-    entry = float(trade["raw_entry_price"])
-    stop = float(trade["stop_price"])
-    target = float(trade["target_price"])
-    side = trade["direction"]
-    risk = abs(entry - stop)
-    exit_ms = _epoch_ms(trade["exit_time_utc"])
-    exit_index = bisect.bisect_left(closes_plus_one, exit_ms)
-    exit_index = min(max(exit_index, entry_index), len(rows) - 1)
-    window = rows[entry_index:exit_index + 1]
-    if not window or risk <= 0:
-        return {
-            "mfe_r": None, "mae_r": None,
-            "mfe_r_before_exit_bar": None, "mae_r_before_exit_bar": None,
-            "bars_with_both_stop_and_target_touched": None,
-            "entry_bar_range_atr": None, "entry_bar_body_fraction": None,
-            "entry_bar_close_location": None,
-            "entry_bar_body_direction_against_trade": None,
-            "entry_bar_close_beyond_entry_against_trade": None,
-        }
-    highs = [float(row["high"]) for row in window]
-    lows = [float(row["low"]) for row in window]
-    if side == "long":
-        mfe = (max(highs) - entry) / risk
-        mae = (entry - min(lows)) / risk
+def _trend_alignment(direction: str, context: dict[str, Any]) -> str:
+    position, slope = context.get("position_pct"), context.get("slope_pct_3bars")
+    if position is None or slope is None:
+        return "unknown"
+    if direction == "long":
+        if position > 0 and slope > 0: return "aligned"
+        if position < 0 and slope < 0: return "opposed"
     else:
-        mfe = (entry - min(lows)) / risk
-        mae = (max(highs) - entry) / risk
-    prior_window = window[:-1]
-    if prior_window:
-        prior_highs = [float(row["high"]) for row in prior_window]
-        prior_lows = [float(row["low"]) for row in prior_window]
-        if side == "long":
-            mfe_before_exit = (max(prior_highs) - entry) / risk
-            mae_before_exit = (entry - min(prior_lows)) / risk
-        else:
-            mfe_before_exit = (entry - min(prior_lows)) / risk
-            mae_before_exit = (max(prior_highs) - entry) / risk
-    else:
-        mfe_before_exit = mae_before_exit = None
+        if position < 0 and slope < 0: return "aligned"
+        if position > 0 and slope > 0: return "opposed"
+    return "mixed"
 
-    both = 0
-    for row in window:
-        high, low = float(row["high"]), float(row["low"])
-        if side == "long":
-            stop_hit, target_hit = low <= stop, high >= target
-        else:
-            stop_hit, target_hit = high >= stop, low <= target
-        if stop_hit and target_hit:
-            both += 1
 
-    entry_bar = rows[entry_index]
-    op, high, low, close = (
-        float(entry_bar[key]) for key in ("open", "high", "low", "close")
-    )
-    candle_range = high - low
-    entry_bar_body_fraction = abs(close - op) / candle_range if candle_range > 0 else None
-    close_location = (close - low) / candle_range if candle_range > 0 else None
-    if candle_range <= 0:
-        adverse_body = None
-        adverse_vs_entry = None
+def excursion_metrics(trade: dict[str, Any], hourly: list[dict[str, str]],
+                      open_times: list[int]) -> dict[str, Any]:
+    entry_ms, exit_ms = _ms(trade["entry_time_utc"]), _ms(trade["exit_time_utc"])
+    first, last = bisect.bisect_left(open_times, entry_ms), bisect.bisect_right(open_times, exit_ms)
+    window = hourly[first:last]
+    if not window:
+        raise ValueError(f"No hourly candles for trade {trade.get('setup_id')}")
+    direction, entry = trade["direction"], float(trade["raw_entry_price"])
+    risk = abs(entry - float(trade["stop_price"]))
+    if risk <= 0: raise ValueError(f"Invalid initial risk for trade {trade.get('setup_id')}")
+    if direction == "long":
+        favorable, adverse = max(float(r["high"]) for r in window)-entry, entry-min(float(r["low"]) for r in window)
+        fi = max(range(len(window)), key=lambda i: float(window[i]["high"]))
+        ai = min(range(len(window)), key=lambda i: float(window[i]["low"]))
     else:
-        adverse_body = close < op if side == "long" else close > op
-        adverse_vs_entry = close < entry if side == "long" else close > entry
+        favorable, adverse = entry-min(float(r["low"]) for r in window), max(float(r["high"]) for r in window)-entry
+        fi = min(range(len(window)), key=lambda i: float(window[i]["low"]))
+        ai = max(range(len(window)), key=lambda i: float(window[i]["high"]))
     return {
-        "mfe_r": round(mfe, 5),
-        "mae_r": round(mae, 5),
-        "mfe_r_before_exit_bar": round(mfe_before_exit, 5) if mfe_before_exit is not None else None,
-        "mae_r_before_exit_bar": round(mae_before_exit, 5) if mae_before_exit is not None else None,
-        "bars_with_both_stop_and_target_touched": both,
-        "entry_bar_range_atr": None,
-        "entry_bar_body_fraction": round(entry_bar_body_fraction, 5) if entry_bar_body_fraction is not None else None,
-        "entry_bar_close_location": round(close_location, 5) if close_location is not None else None,
-        "entry_bar_body_direction_against_trade": adverse_body,
-        "entry_bar_close_beyond_entry_against_trade": adverse_vs_entry,
+        "bars_in_window": len(window), "mfe_price": round(favorable, 8),
+        "mae_price": round(adverse, 8), "mfe_pct_of_entry": round(favorable/entry*100, 6),
+        "mae_pct_of_entry": round(adverse/entry*100, 6), "mfe_r": round(favorable/risk, 6),
+        "mae_r": round(adverse/risk, 6), "bars_to_mfe": fi+1, "bars_to_mae": ai+1,
+        "mfe_time_utc": window[fi]["open_time_utc"], "mae_time_utc": window[ai]["open_time_utc"],
+        "includes_exit_candle": True,
     }
 
 
-def _primary_label(trade: dict[str, Any], flags: dict[str, bool]) -> str:
-    if trade["exit_reason"] == "target":
-        return "target_hit"
-    if trade["exit_reason"] in {"data_gap_exit", "integrity_review_exit", "split_or_segment_end"}:
-        return trade["exit_reason"]
-    if trade["exit_reason"] in {"stop", "stop_gap"} and trade["bars_held"] <= 2:
-        return "rapid_stop_within_2_bars"
-    if flags.get("same_bar_stop_target_ambiguity", False):
-        return "stop_target_both_touched_same_bar"
-    if flags.get("directional_rsi_exhaustion_at_entry", False):
-        return "directional_rsi_exhaustion_at_entry"
-    if flags.get("higher_timeframe_conflict_at_entry", False):
-        return "higher_timeframe_ema_conflict"
-    if flags.get("high_atr_at_entry", False):
-        return "high_volatility_at_entry"
-    if flags.get("entry_bar_body_direction_against_trade", False):
-        return "entry_bar_body_direction_against_trade"
-    return "other_stop_or_loss"
-
-
-def diagnose(
-    symbol: str,
-    data_dir: Path,
-    input_report: Path | None = None,
-    output_json: Path | None = None,
-    output_csv: Path | None = None,
-) -> dict[str, Any]:
-    hourly = hb._closed_rows(data_dir / f"{symbol}_1h.csv", symbol, "1h")
-    rows_by_interval = {
-        interval: hb._closed_rows(data_dir / f"{symbol}_{interval}.csv", symbol, interval)
-        for interval in ("1h", "4h", "1d")
+def _summary(trades: list[dict[str, Any]]) -> dict[str, Any]:
+    wins = [t for t in trades if float(t["r_multiple"]) > 0]
+    losers = [t for t in trades if float(t["r_multiple"]) <= 0]
+    stops = [t for t in trades if t["exit_reason"] in {"stop", "stop_gap"}]
+    def mean(key: str) -> float | None:
+        return round(sum(float(t[key]) for t in trades)/len(trades), 6) if trades else None
+    return {
+        "trades": len(trades), "wins": len(wins), "losses_and_breakeven": len(losers),
+        "win_rate_percent": round(100*len(wins)/len(trades), 4) if trades else 0.0,
+        "mean_mfe_r": mean("mfe_r"), "mean_mae_r": mean("mae_r"),
+        "rapid_stops_le_2_bars": sum(int(t["bars_held"]) <= 2 for t in stops),
+        "stop_count": len(stops),
+        "losers_reached_mfe_0_5r": sum(float(t["mfe_r"]) >= .5 for t in losers),
+        "losers_reached_mfe_1r": sum(float(t["mfe_r"]) >= 1 for t in losers),
+        "trend_aligned": sum(t["trend_4h_alignment"] == "aligned" for t in trades),
+        "trend_opposed": sum(t["trend_4h_alignment"] == "opposed" for t in trades),
+        "trend_mixed_or_unknown": sum(t["trend_4h_alignment"] in {"mixed", "unknown"} for t in trades),
     }
-    report_path = input_report or data_dir / f"{symbol}_mtf_backtest.json"
-    report = json.loads(report_path.read_text(encoding="utf-8"))
-    trades = report.get("trades")
-    if not trades and isinstance(report.get("selection"), dict):
-        selected_test = report["selection"].get("test_trades", [])
-        trades = [dict(row, split=row.get("split", "test")) for row in selected_test]
-    if not trades:
-        raise ValueError(f"No trade records found in {report_path}")
 
-    features = wr.build_feature_rows(rows_by_interval, hourly)
-    asof_times = [int(item["asof_ms"]) for item in features]
-    open_times = [int(row["open_time"]) for row in hourly]
-    closes_plus_one = [int(row["close_time"]) + 1 for row in hourly]
-    atr_cutoff = wr._training_percentile(
-        [
-            float(feature["atr_pct"])
-            for feature in features[:int(len(features) * 0.6)]
-            if _finite(feature.get("atr_pct"))
-        ],
-        0.75,
-    )
 
-    diagnostic_rows: list[dict[str, Any]] = []
-    for trade in trades:
-        signal_ms = _epoch_ms(trade["signal_time_utc"])
-        entry_ms = _epoch_ms(trade["entry_time_utc"])
-        signal_index = bisect.bisect_left(asof_times, signal_ms)
-        if signal_index >= len(asof_times) or asof_times[signal_index] != signal_ms:
-            signal_index = bisect.bisect_right(asof_times, signal_ms) - 1
-        signal_feature = features[signal_index] if signal_index >= 0 else None
-
-        entry_index = bisect.bisect_left(open_times, entry_ms)
-        if entry_index >= len(open_times) or open_times[entry_index] != entry_ms:
-            entry_index = None
-        entry_feature_index = bisect.bisect_right(asof_times, entry_ms) - 1
-        entry_feature = features[entry_feature_index] if entry_feature_index >= 0 else None
-        feature_age_minutes = (
-            (entry_ms - asof_times[entry_feature_index]) / 60000
-            if entry_feature_index >= 0 else None
-        )
-
-        direction = trade["direction"]
-        signal = _indicator_slice(signal_feature)
-        entry = _indicator_slice(entry_feature)
-        entry_4h = _direction_aligned(entry.get("4h_ema_position"), direction)
-        entry_1d = _direction_aligned(entry.get("1d_ema_position"), direction)
-        rsi = entry.get("rsi14")
-        rsi_exhaustion = (
-            (direction == "long" and rsi is not None and rsi >= 65)
-            or (direction == "short" and rsi is not None and rsi <= 35)
-        )
-        entry_atr_high = (
-            entry.get("atr_pct") is not None and atr_cutoff is not None
-            and entry["atr_pct"] > atr_cutoff
-        )
-        excursion = _trade_excursion(hourly, closes_plus_one, entry_index, trade)
-        if entry_index is not None and entry.get("atr14") is not None:
-            entry_bar_range = float(hourly[entry_index]["high"]) - float(hourly[entry_index]["low"])
-            excursion["entry_bar_range_atr"] = (
-                round(entry_bar_range / float(entry["atr14"]), 5)
-                if float(entry["atr14"]) > 0 else None
-            )
-        flags = {
-            "rapid_stop_within_2_bars": trade["exit_reason"] in {"stop", "stop_gap"} and int(trade["bars_held"]) <= 2,
-            "directional_rsi_exhaustion_at_signal": (
-                (direction == "long" and signal.get("rsi14") is not None and signal["rsi14"] >= 65)
-                or (direction == "short" and signal.get("rsi14") is not None and signal["rsi14"] <= 35)
-            ),
-            "directional_rsi_exhaustion_at_entry": bool(rsi_exhaustion),
-            "higher_timeframe_conflict_at_entry": entry_4h is False or entry_1d is False,
-            "higher_timeframes_both_aligned_at_entry": entry_4h is True and entry_1d is True,
-            "high_atr_at_entry": bool(entry_atr_high),
-            "stale_signal_24h_or_more": (entry_ms - signal_ms) >= 24 * 3_600_000,
-            "same_bar_stop_target_ambiguity": (
-                excursion.get("bars_with_both_stop_and_target_touched") is not None
-                and excursion["bars_with_both_stop_and_target_touched"] > 0
-                and trade["exit_reason"] in {"stop", "stop_gap"}
-            ),
-            "entry_bar_body_direction_against_trade": excursion.get("entry_bar_body_direction_against_trade") is True,
-            "entry_bar_close_beyond_entry_against_trade": excursion.get("entry_bar_close_beyond_entry_against_trade") is True,
-        }
-        flags["entry_features_older_than_4h"] = feature_age_minutes is not None and feature_age_minutes > 240
-        flags["profitable_trade"] = float(trade["r_multiple"]) > 0
-        flags["losing_trade"] = float(trade["r_multiple"]) <= 0
-        primary = _primary_label(trade, flags)
-        diagnostic_rows.append({
-            **trade,
-            "signal_features": signal,
-            "entry_time_features_last_closed_candle": entry,
-            "entry_feature_age_minutes": feature_age_minutes,
-            "training_75th_percentile_atr_pct": atr_cutoff,
-            "diagnostic_flags": flags,
-            "primary_diagnostic_label": primary,
-            **excursion,
-        })
-
-    summaries: dict[str, Any] = {}
-    all_splits = sorted({str(trade.get("split", "all")) for trade in diagnostic_rows})
-    for split in all_splits:
-        subset = [row for row in diagnostic_rows if str(row.get("split", "all")) == split]
-        loss_rows = [row for row in subset if row["diagnostic_flags"]["losing_trade"]]
-        flag_summary = {}
-        flag_names = [
-            "rapid_stop_within_2_bars",
-            "directional_rsi_exhaustion_at_signal",
-            "directional_rsi_exhaustion_at_entry",
-            "higher_timeframe_conflict_at_entry",
-            "higher_timeframes_both_aligned_at_entry",
-            "high_atr_at_entry",
-            "stale_signal_24h_or_more",
-            "same_bar_stop_target_ambiguity",
-            "entry_bar_body_direction_against_trade",
-            "entry_bar_close_beyond_entry_against_trade",
-            "entry_features_older_than_4h",
-        ]
-        for flag in flag_names:
-            flagged = [row for row in subset if row["diagnostic_flags"][flag]]
-            flagged_losses = [row for row in loss_rows if row["diagnostic_flags"][flag]]
-            flag_summary[flag] = {
-                "flagged_trade_count": len(flagged),
-                "flagged_loss_count": len(flagged_losses),
-                "percent_of_losses_with_flag": round(100 * len(flagged_losses) / len(loss_rows), 2) if loss_rows else 0.0,
-                "flagged_win_rate_percent": round(
-                    100 * sum(float(row["r_multiple"]) > 0 for row in flagged) / len(flagged), 2
-                ) if flagged else None,
-                "flagged_mean_r": round(
-                    sum(float(row["r_multiple"]) for row in flagged) / len(flagged), 5
-                ) if flagged else None,
+def run_diagnostics(data_dir: Path, input_report: Path, output_json: Path,
+                    output_csv: Path) -> dict[str, Any]:
+    report = json.loads(input_report.read_text(encoding="utf-8"))
+    hourly, four, daily = (_read_csv(data_dir / f"BTCUSDT_{i}.csv") for i in ("1h", "4h", "1d"))
+    h_open = [int(r["open_time"]) for r in hourly]
+    four_ema = _ema20_by_segment(four, 4*60*60*1000)
+    day_ema = _ema20_by_segment(daily, 24*60*60*1000)
+    four_close = [int(r["close_time"])+1 for r in four]
+    day_close = [int(r["close_time"])+1 for r in daily]
+    variants, all_rows = {}, []
+    for name, variant in report["variants"].items():
+        enriched = []
+        for trade in variant["trades"]:
+            row = dict(trade)
+            row.update(excursion_metrics(trade, hourly, h_open))
+            signal = _ms(trade["signal_time_utc"])
+            c4 = _context_at(four, four_ema, four_close, signal)
+            c1d = _context_at(daily, day_ema, day_close, signal)
+            row["trend_4h_alignment"] = _trend_alignment(trade["direction"], c4)
+            row["trend_1d_alignment"] = _trend_alignment(trade["direction"], c1d)
+            row["4h_context"], row["1d_context"] = c4, c1d
+            enriched.append(row)
+            flat = {k:v for k,v in row.items() if not isinstance(v,dict)}
+            flat.update({"4h_ema20_position_pct":c4["position_pct"],
+                         "4h_ema20_slope_pct_3bars":c4["slope_pct_3bars"],
+                         "1d_ema20_position_pct":c1d["position_pct"],
+                         "1d_ema20_slope_pct_3bars":c1d["slope_pct_3bars"]})
+            all_rows.append({"variant":name, **flat})
+        splits = {}
+        for split in ("train","validation","test"):
+            subset = [t for t in enriched if t["split"] == split]
+            splits[split] = {
+                "all":_summary(subset),
+                "winners":_summary([t for t in subset if float(t["r_multiple"])>0]),
+                "losers":_summary([t for t in subset if float(t["r_multiple"])<=0]),
+                "by_4h_trend":{k:_summary([t for t in subset if t["trend_4h_alignment"]==k])
+                               for k in ("aligned","opposed","mixed","unknown")},
             }
-        summaries[split] = {
-            "trade_count": len(subset),
-            "win_count": sum(float(row["r_multiple"]) > 0 for row in subset),
-            "loss_count": sum(float(row["r_multiple"]) <= 0 for row in subset),
-            "win_rate_percent": round(
-                100 * sum(float(row["r_multiple"]) > 0 for row in subset) / len(subset), 2
-            ) if subset else 0.0,
-            "expectancy_r": round(
-                sum(float(row["r_multiple"]) for row in subset) / len(subset), 5
-            ) if subset else 0.0,
-            "exit_reasons": dict(Counter(row["exit_reason"] for row in subset)),
-            "primary_diagnostic_labels": dict(Counter(row["primary_diagnostic_label"] for row in subset)),
-            "failure_flags": flag_summary,
-        }
-
-    result = {
-        "report_type": "btc_formal_strategy_trade_diagnostics",
-        "report_version": 1,
-        "strategy": report.get("data", {}).get("strategy", "mtf-bos-ob-retest-v1"),
-        "source_backtest_report": str(report_path),
-        "method": {
-            "indicator_timing": "Signal features use candles closed by signal timestamp. Entry features use the last candle fully closed at or before entry open; no unfinished entry candle is used for entry filters.",
-            "atr_threshold": "75th percentile of ATR/price fitted on first 60% of chronological hourly feature rows only.",
-            "primary_label_is_heuristic": True,
-            "warning": "Flags describe associations and path symptoms, not proven causal explanations. Full-trade MFE/MAE include exit-bar OHLC and cannot reveal exact intrabar event order; separate before-exit-bar excursion fields exclude the exit candle.",
+        variants[name] = {"trade_count":len(enriched),"splits":splits,"trades":enriched}
+    output = {
+        "report_type":"btc_mtf_trade_diagnostics","report_version":1,
+        "strategy":report.get("strategy"),"data":report.get("data"),
+        "definitions":{
+            "MFE":"Maximum favorable hourly high/low excursion from raw entry between entry and exit.",
+            "MAE":"Maximum adverse hourly low/high excursion from raw entry between entry and exit.",
+            "MFE_R_and_MAE_R":"Excursion divided by raw entry-to-stop distance.",
+            "trend_alignment":"At signal time, last fully closed 4H/daily close vs EMA20 and 3-bar EMA20 slope both agree with trade direction for aligned/opposed; otherwise mixed.",
+            "exit_candle_caveat":"Excursions include the exit candle. OHLC cannot reveal intrabar high/low order, so exit-candle excursions are path-ambiguous.",
+            "scope":"Diagnostics describe existing trades only; no strategy rule is changed.",
         },
-        "training_75th_percentile_atr_pct": atr_cutoff,
-        "split_summaries": summaries,
-        "trades": diagnostic_rows,
+        "variants":variants,
     }
-    out_json = output_json or data_dir / f"{symbol}_trade_diagnostics.json"
-    out_csv = output_csv or data_dir / f"{symbol}_trade_diagnostics.csv"
-    hb._atomic_json(out_json, result)
-    out_csv.parent.mkdir(parents=True, exist_ok=True)
-    flat_rows = []
-    for row in diagnostic_rows:
-        flat = {key: value for key, value in row.items()
-                if key not in {"signal_features", "entry_time_features_last_closed_candle", "diagnostic_flags"}}
-        for prefix in ("signal_features", "entry_time_features_last_closed_candle"):
-            for key, value in row[prefix].items():
-                flat[f"{prefix}_{key}"] = value
-        for key, value in row["diagnostic_flags"].items():
-            flat[f"flag_{key}"] = value
-        flat_rows.append(flat)
-    fields = list(dict.fromkeys(key for row in flat_rows for key in row))
-    with out_csv.open("w", newline="", encoding="utf-8-sig") as stream:
-        writer = csv.DictWriter(stream, fieldnames=fields)
-        writer.writeheader()
-        writer.writerows(flat_rows)
-
-    print(json.dumps({
-        "output_json": str(out_json),
-        "output_csv": str(out_csv),
-        "strategy": result["strategy"],
-        "training_75th_percentile_atr_pct": atr_cutoff,
-        "split_summaries": summaries,
-        "trade_records": len(diagnostic_rows),
-    }, ensure_ascii=False, indent=2))
-    return result
+    output_json.parent.mkdir(parents=True,exist_ok=True)
+    output_json.write_text(json.dumps(output,ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
+    if all_rows:
+        with output_csv.open("w",encoding="utf-8-sig",newline="") as stream:
+            writer=csv.DictWriter(stream,fieldnames=list(all_rows[0]))
+            writer.writeheader(); writer.writerows(all_rows)
+    return output
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Diagnose every trade from the formal BTC MTF backtest.")
-    parser.add_argument("symbol", nargs="?", default="BTCUSDT")
-    parser.add_argument("--data-dir", type=Path, default=Path("data/historical"))
-    parser.add_argument("--input-report", type=Path)
-    parser.add_argument("--research-report", type=Path)
-    parser.add_argument("--output-json", type=Path)
-    parser.add_argument("--output-csv", type=Path)
-    args = parser.parse_args()
-    diagnose(
-        args.symbol, args.data_dir,
-        input_report=args.input_report,
-        output_json=args.output_json,
-        output_csv=args.output_csv,
-    )
-    research_path = args.research_report or args.data_dir / f"{args.symbol}_winrate_research.json"
-    if research_path.exists():
-        selected_report = json.loads(research_path.read_text(encoding="utf-8"))
-        selected_trades = selected_report.get("selection", {}).get("test_trades", [])
-        if selected_trades:
-            diagnose(
-                args.symbol, args.data_dir,
-                input_report=research_path,
-                output_json=args.data_dir / f"{args.symbol}_selected_test_diagnostics.json",
-                output_csv=args.data_dir / f"{args.symbol}_selected_test_diagnostics.csv",
-            )
+    p=argparse.ArgumentParser(description=__doc__)
+    p.add_argument("--data-dir",type=Path,default=Path("data/historical"))
+    p.add_argument("--input",type=Path,default=Path("data/historical/BTCUSDT_stop_loss_research.json"))
+    p.add_argument("--output-json",type=Path,default=Path("data/historical/BTCUSDT_trade_diagnostics.json"))
+    p.add_argument("--output-csv",type=Path,default=Path("data/historical/BTCUSDT_trade_diagnostics.csv"))
+    a=p.parse_args()
+    r=run_diagnostics(a.data_dir,a.input,a.output_json,a.output_csv)
+    print(f"逐筆診斷報告：{a.output_json}")
+    print(f"逐筆 CSV：{a.output_csv}")
+    for name,v in r["variants"].items():
+        x=v["splits"]["test"]["all"]
+        print(f"{name} test: trades={x['trades']}, mean_MFE={x['mean_mfe_r']}R, mean_MAE={x['mean_mae_r']}R, losers_MFE>=0.5R={x['losers_reached_mfe_0_5r']}, 4H_aligned={x['trend_aligned']}, 4H_opposed={x['trend_opposed']}")
     return 0
 
 
-if __name__ == "__main__":
+if __name__=="__main__":
     raise SystemExit(main())
