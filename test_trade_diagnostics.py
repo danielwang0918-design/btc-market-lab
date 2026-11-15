@@ -22,7 +22,7 @@ class TradeDiagnosticsTests(unittest.TestCase):
         rows=[{"open_time":str(i*100),"close":str(i+1)} for i in range(21)]
         rows.append({"open_time":str(22*100),"close":"22"})
         ema=td._ema20_by_segment(rows,100)
-        self.assertIsNotNone(ema[19]); self.assertIsNone(ema[21]); self.assertIsNone(ema[22])
+        self.assertIsNotNone(ema[19]); self.assertIsNone(ema[21])
 
     def test_trend_alignment_requires_position_and_slope(self):
         self.assertEqual(td._trend_alignment("long",{"position_pct":1,"slope_pct_3bars":1}),"aligned")
