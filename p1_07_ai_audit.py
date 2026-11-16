@@ -121,6 +121,9 @@ def meta_features(row):
         log1p_known_registration_delay=math.log1p(float(delay)) if delay is not None and delay>=0 else None)
 
 def accept_for_entry(prediction, flag, entry_time_ms):
+    # The model fits the entire purged Train segment. In-sample Train scores
+    # are diagnostics; that fitted model cannot authorize earlier entries.
+    if flag=='accept_ml' and entry_time_ms<VALIDATION:return False
     return prediction is not None and prediction[flag] in (True, 'True')
 
 

@@ -37,6 +37,7 @@
 - SimpleImputer中位數、StandardScaler均只fit Train；Logistic Regression C=1、liblinear、random_state=0、max_iter=1000、class_weight=None、固定門檻0.5。
 - 固定規則對照為事前正常風險成本占比≤0.25，另列accept-all；無門檻或C值搜尋。
 - 所有525個long eligible都輸出預測。未來才知道的gap／path品質旗標只用於排除不可信訓練／分類標籤，**不作預測或資金模擬的拒單條件**。輸入特徵時間晚於進場則fail closed。
+- Train分數只作樣本內回代診斷；全Train模型在2023 cutoff之前尚未訓練完成，ML帳戶一律觀望，只有其後才可依固定分數與閾值准入。固定成本對照無訓練時間限制。
 
 本地固定依賴：numpy2.3.5、scipy1.17.0、scikit-learn1.8.0；模型JSON記錄中位數、標準化均值／尺度、係數、截距、版本及訓練筆數，毋須pickle。CI數字與版本以Artifact為準。
 
@@ -71,4 +72,4 @@
 
 `python -m unittest test_p1_07_ai_audit -v`；`python p1_07_ai_audit.py --source-zip P1-06B.zip --out-dir NEW_EMPTY_FOLDER`。
 
-輸出：`ai_opportunity_audit.csv`完整4583機會、`ai_split_census.csv`、`ai_complete_case_features.csv`、`meta_predictions.csv`全部525預測、`meta_model.json`、`meta_classification.csv`、`AI_FEASIBILITY_RESULT_ZH.md`與`ai_audit_manifest.json`。所有主要輸出及程式有SHA256；18項測試涵蓋母體、重複label、未來特徵、未知品質、purging、Train-only預處理與未知label仍預測。
+輸出：`ai_opportunity_audit.csv`完整4583機會、`ai_split_census.csv`、`ai_complete_case_features.csv`、`meta_predictions.csv`全部525預測、`meta_model.json`、`meta_classification.csv`、`AI_FEASIBILITY_RESULT_ZH.md`與`ai_audit_manifest.json`。所有主要輸出及程式有SHA256；19項測試涵蓋母體、重複label、未來特徵、未知品質、purging、Train-only預處理、未知label仍預測及模型生效時點。
