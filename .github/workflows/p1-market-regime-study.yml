@@ -1,0 +1,87 @@
+name: P1-03 MA200 and ATR pre-pattern market regime (research only)
+
+on:
+  push:
+    branches: ["research/p1-03-market-regime"]
+    paths:
+      - "p1_market_regime.py"
+      - "test_p1_market_regime.py"
+      - ".github/workflows/p1-market-regime-study.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: p1-03-market-regime-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  frozen-study:
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - name: Run repository unit tests, including strict prior-bar guards
+        run: python -m unittest -v
+      - name: Retrieve only frozen Binance Spot and P1-01 observed events
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p data/p1_03/frozen research/p1_03/upstream
+          gh run download 43820018876 -R "$GITHUB_REPOSITORY" -n multi-asset-input-43820018876 -D data/p1_03/frozen
+          gh run download 43852683913 -R "$GITHUB_REPOSITORY" -n p1-01-closed-candlestick-study-43852683913 -D research/p1_03/upstream
+      - name: Replay MA200 and ATR regimes only from prior closed 1H/4H/1D bars
+        run: >-
+          python -u p1_market_regime.py
+          --frozen data/p1_03/frozen
+          --p1-artifact research/p1_03/upstream
+          --lock PROSPECTIVE_LOCK_V1.json
+          --out-dir research/p1_03/results
+      - name: Reject missing or multiplied unique patterns and incomplete horizons
+        run: |
+          python - <<'PY'
+          import csv,json
+          from pathlib import Path
+          from collections import Counter
+          p=Path('research/p1_03/results')
+          r=json.loads((p/'p1_03_manifest.json').read_text(encoding='utf-8'))
+          assert r['status']=='historical_exploratory_only'
+          assert r['decision_timeframes']==['1h','4h','1d']
+          assert r['unique_events']==106155
+          assert r['observations']==318465
+          assert sum(r['trend_counts'].values())==106155
+          assert sum(r['volatility_counts'].values())==106155
+          with (p/'p1_03_regime_evidence.csv').open(encoding='utf-8',newline='') as stream:
+              assert sum(1 for _ in csv.DictReader(stream))==106155
+          with (p/'p1_03_regime_summary.csv').open(encoding='utf-8',newline='') as stream:
+              rows=list(csv.DictReader(stream))
+              assert sum(int(x['events']) for x in rows)==318465
+              assert sum(int(x['evaluated'])+int(x['censored']) for x in rows)==318465
+          print('P1-03 verified: 106155 events, 318465 observed horizon rows, all SHA256 sources frozen.')
+          PY
+      - name: Publish descriptive result summary
+        if: success()
+        run: |
+          python - <<'PY'
+          import json,os
+          from pathlib import Path
+          x=json.loads(Path('research/p1_03/results/p1_03_manifest.json').read_text())
+          out='## P1-03 MA200 x ATR, descriptive only\n\n' + f"- {x['unique_events']} unique events; {x['observations']} fixed horizon observations.\n" + f"- MA trend: {x['trend_counts']}\n" + f"- ATR distribution: {x['volatility_counts']}\n" + '\nAlready opened Test; NOT a trading win rate or new holdout.\n'
+          print(out)
+          if os.environ.get('GITHUB_STEP_SUMMARY'):
+              Path(os.environ['GITHUB_STEP_SUMMARY']).open('a').write(out)
+          PY
+      - name: Upload entire result matrix including uncertain/insufficient categories
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p1-03-verified-regime-observations-${{ github.run_id }}
+          path: research/p1_03/results/*
+          if-no-files-found: warn
+          retention-days: 45
