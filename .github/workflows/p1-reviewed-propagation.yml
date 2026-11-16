@@ -1,0 +1,78 @@
+name: P1 Codex-reviewed pattern propagation to zones and MA ATR (1H+ only)
+
+on:
+  push:
+    branches: ["research/p1-01-review-propagation"]
+    paths:
+      - "p1_zone_context.py"
+      - "p1_market_regime.py"
+      - "p1_review_propagation_audit.py"
+      - "test_p1_review_propagation.py"
+      - ".github/workflows/p1-reviewed-propagation.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: p1-reviewed-propagation-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Recompute all 106433 and audit old 106155 classifications
+    runs-on: ubuntu-latest
+    timeout-minutes: 110
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - name: Run full test suite, including 1H+ and zero-volume guards
+        run: python -m unittest -v
+      - name: Download exact prior reviewed and original evidence (no new market requests)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p data/reviewed_frozen research/reviewed_p1 research/previous_zone research/previous_regime
+          gh run download 43820018876 -R "$GITHUB_REPOSITORY" -n multi-asset-input-43820018876 -D data/reviewed_frozen
+          gh run download 43857787070 -R "$GITHUB_REPOSITORY" -n p1-01-review-evidence-43857787070 -D research/reviewed_p1
+          gh run download 43856047519 -R "$GITHUB_REPOSITORY" -n p1-02-verified-zone-observations-43856047519 -D research/previous_zone
+          gh run download 43859350879 -R "$GITHUB_REPOSITORY" -n p1-03-verified-regime-observations-43859350879 -D research/previous_regime
+      - name: Reclassify reviewed source using unchanged prior zone geometry
+        run: >-
+          python -u p1_zone_context.py
+          --frozen data/reviewed_frozen
+          --p1-artifact research/reviewed_p1/after
+          --lock PROSPECTIVE_LOCK_V1.json
+          --out-dir research/p1_review_propagation/zone
+      - name: Reclassify reviewed source using unchanged MA200 and ATR thresholds
+        run: >-
+          python -u p1_market_regime.py
+          --frozen data/reviewed_frozen
+          --p1-artifact research/reviewed_p1/after
+          --lock PROSPECTIVE_LOCK_V1.json
+          --out-dir research/p1_review_propagation/regime
+      - name: Require exact old classifications and audited 24 unavailable paper fills
+        run: >-
+          python -u p1_review_propagation_audit.py
+          --old-zone research/previous_zone/p1_02_zone_evidence.csv
+          --new-zone research/p1_review_propagation/zone/p1_02_zone_evidence.csv
+          --old-regime research/previous_regime/p1_03_regime_evidence.csv
+          --new-regime research/p1_review_propagation/regime/p1_03_regime_evidence.csv
+          --p1-events research/reviewed_p1/after/p1_01_events.csv
+          --p1-manifest research/reviewed_p1/after/p1_01_manifest.json
+          --outdir research/p1_review_propagation/audit
+      - name: Publish non-promotional descriptive result
+        if: success()
+        run: cat research/p1_review_propagation/audit/P1_REVIEW_PROPAGATION_RESULT.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload all independently verifiable results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p1-reviewed-propagation-${{ github.run_id }}
+          path: research/p1_review_propagation/
+          if-no-files-found: warn
+          retention-days: 45
