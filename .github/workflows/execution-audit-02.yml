@@ -1,0 +1,106 @@
+name: P0 OB entry fill-time audit (frozen BTC ETH SOL)
+
+on:
+  push:
+    branches: ["codex/**"]
+    paths:
+      - "execution_audit_02.py"
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: "Completed/partial multi-asset baseline run with frozen history and BTC ETH SOL reports"
+        required: false
+        default: "43820018876"
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: p0-execution-audit-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    name: Test 1H evidence and verify 1m entry-hour order
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Check out research branch (never execute trades)
+        uses: actions/checkout@v4
+      - name: Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Run offline test suite
+        run: python -m unittest -v
+      - name: Retrieve existing frozen research artifacts (NO full-history redownload)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.inputs.source_run_id || '43820018876' }}
+        run: |
+          set -euo pipefail
+          case "$RUN_ID" in *[!0-9]*|'') echo 'Run ID must be numeric' >&2; exit 1;; esac
+          mkdir -p /tmp/p0-history /tmp/p0-per-symbol research/execution_audit_02/source
+          gh run download "$RUN_ID" -R "$GITHUB_REPOSITORY" -n "multi-asset-input-$RUN_ID" -D /tmp/p0-history
+          for symbol in BTCUSDT ETHUSDT SOLUSDT; do
+            mkdir -p "/tmp/p0-per-symbol/$symbol"
+            gh run download "$RUN_ID" -R "$GITHUB_REPOSITORY" -n "multi-asset-baseline-$RUN_ID-$symbol" -D "/tmp/p0-per-symbol/$symbol"
+          done
+          python - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile, ZIP_DEFLATED
+          import shutil
+          root=Path('research/execution_audit_02/source')
+          with ZipFile(root/'frozen_history.zip','w',compression=ZIP_DEFLATED) as z:
+              for path in sorted(Path('/tmp/p0-history').glob('*')):
+                  if path.is_file(): z.write(path,arcname=path.name)
+          for symbol in ('BTCUSDT','ETHUSDT','SOLUSDT'):
+              src=Path('/tmp/p0-per-symbol')/symbol/(symbol+'_fixed_calendar_baseline.json')
+              if not src.is_file(): raise SystemExit('Missing per-symbol evidence: '+symbol)
+              with ZipFile(root/(symbol+'.zip'),'w',compression=ZIP_DEFLATED) as z:
+                  z.write(src,arcname=src.name)
+          PY
+      - name: Recheck original 1H OHLC and exact SHA256
+        run: >-
+          python -u execution_audit_02.py
+          --history-zip research/execution_audit_02/source/frozen_history.zip
+          --report-zip research/execution_audit_02/source/BTCUSDT.zip
+          --report-zip research/execution_audit_02/source/ETHUSDT.zip
+          --report-zip research/execution_audit_02/source/SOLUSDT.zip
+          --symbols BTCUSDT,ETHUSDT,SOLUSDT
+          --output-dir research/execution_audit_02/results
+      - name: Independently verify only Test entry-hour 1-minute OHLC
+        run: >-
+          python -u execution_audit_02.py
+          --history-zip research/execution_audit_02/source/frozen_history.zip
+          --report-zip research/execution_audit_02/source/BTCUSDT.zip
+          --report-zip research/execution_audit_02/source/ETHUSDT.zip
+          --report-zip research/execution_audit_02/source/SOLUSDT.zip
+          --symbols BTCUSDT,ETHUSDT,SOLUSDT
+          --minute-verify --request-budget 150
+          --output-dir research/execution_audit_02/results
+      - name: Publish entry fill-time evidence summary
+        if: always()
+        run: |
+          if [ -f research/execution_audit_02/results/execution_audit_02.md ]; then
+            cat research/execution_audit_02/results/execution_audit_02.md
+            if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+              cat research/execution_audit_02/results/execution_audit_02.md >> "$GITHUB_STEP_SUMMARY"
+            fi
+          else
+            echo 'P0 audit missing: inspect failed earlier steps.'
+          fi
+      - name: Upload P0 audit (NO live orders)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: execution-audit-02-${{ github.run_id }}
+          path: |
+            research/execution_audit_02/results/execution_audit_02.json
+            research/execution_audit_02/results/execution_audit_02.md
+            research/execution_audit_02/results/execution_audit_02_trades.csv
+            research/execution_audit_02/results/1m_evidence/*.json
+          if-no-files-found: warn
+          retention-days: 30
