@@ -83,7 +83,9 @@ def generate(a):
                 valid_location=entry_location(p['side'],e,level)
                 # Both long arms must stay above their respective level; short mirror.
                 if not valid_location:reject('next_open_lost_confirmation');continue
-                atr=a.reg.atr[j-1] if j else None
+                if not j or a.bars[j-1].open_ms+money.H!=confirm.open_ms:
+                    reject('preconfirmation_ATR_gap');continue
+                atr=a.reg.atr[j-1]
                 if atr is None or atr<=0:reject('unknown_preconfirmation_ATR');continue
                 prefix=intraday_prefix(a.bars,j);s=min(v.l for v in prefix)-D('.1')*D(str(atr)) if p['side']=='long' else max(v.h for v in prefix)+D('.1')*D(str(atr))
                 if not (0<s<e if p['side']=='long' else 0<e<s):reject('invalid_SL');continue
