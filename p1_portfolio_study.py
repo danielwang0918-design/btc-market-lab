@@ -45,6 +45,17 @@ def audit_run(result,model):
         expected_fees=q*(e+x)*D('.001')
         gross=q*(x-e if side=='long' else e-x)
         net=gross-expected_fees
+        sign=D(1) if side=='long' else D(-1)
+        expected_entry=t['raw_entry']*(1+sign*slip)
+        expected_exit=t['raw_exit']*(1-sign*slip)
+        nominal_entry=t['raw_entry']*(1+sign*D('.0005'))
+        nominal_stop=t['stop']*(1-sign*D('.0005'))
+        planned=q*(abs(nominal_entry-nominal_stop)+(nominal_entry+nominal_stop)*D('.001'))
+        if abs(e-expected_entry)>D('1e-12') or abs(x-expected_exit)>D('1e-12'):raise ValueError('Raw price/slippage fill mismatch')
+        if abs(planned-t['planned_risk'])>D('1e-12') or abs(t['risk_budget']-t['equity_before']*D('.02'))>D('1e-12'):raise ValueError('Normal-stop risk does not reconcile')
+        if abs(net/planned-t['r_multiple'])>D('1e-12'):raise ValueError('Reported R differs from quantity/cost risk')
+        raw_gross=q*(t['raw_exit']-t['raw_entry'])*sign
+        if abs(raw_gross-gross-t['slippage_usdt'])>D('1e-12'):raise ValueError('Slippage cash impact differs')
         if abs(net-t['net_pnl_usdt'])>D('1e-16') or abs(expected_fees-t['fees_usdt'])>D('1e-16'):raise ValueError('Cash/fee/PnL mismatch')
         equity+=net
         if abs(equity-t['equity_after'])>D('1e-15'):raise ValueError('Equity does not reconcile')

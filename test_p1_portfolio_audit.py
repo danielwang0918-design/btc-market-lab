@@ -29,4 +29,11 @@ class AccountAuditTests(unittest.TestCase):
         r=study.metrics([])
         self.assertIsNone(r['win_rate_pct']);self.assertIsNone(r['average_R'])
         self.assertIsNone(r['profit_factor'])
+    def test_wrong_planned_stop_risk_cannot_pass_cash_only_reconciliation(self):
+        r=self.result();r['trades'][0]['planned_risk']-=D(1)
+        with self.assertRaisesRegex(ValueError,'risk'):study.audit_run(r,'fractional_spot')
+    def test_wrong_R_or_slippage_cannot_pass_matching_final_equity(self):
+        for field in ('r_multiple','slippage_usdt'):
+            r=self.result();r['trades'][0][field]+=D(1)
+            with self.subTest(field=field),self.assertRaises(ValueError):study.audit_run(r,'fractional_spot')
 if __name__=='__main__':unittest.main()
