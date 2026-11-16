@@ -124,7 +124,7 @@ def catalog():
 
 
 def identity(row,population):
-    return (population,row.get('model','conditional_paper_'+row['side']),row.get('period','continuous'),row['scenario'],row['policy'])
+    return (population,row.get('model','conditional_paper_'+row.get('side','unknown')),row.get('period','continuous'),row['scenario'],row['policy'])
 
 
 def split(t):return 'train' if t<money.CUTS[0] else 'validation' if t<money.CUTS[1] else 'opened_test'
@@ -296,6 +296,7 @@ def associations(out,isolated,seeds,cache,features):
                     return sum(values)/len(values) if values else None
                 grouped.append(dict(policy=policy,side=side,period=period,universe=universe,feature=field,category=category,
                     n=len(subset),n_complete=len(valid),n_post_exit_tape=sum(r['contains_post_exit_prices'] for r in subset),
+                    n_mfe_ATRpre=sum(r['mfe_ATRpre'] is not None for r in valid),
                     mean_mfe_R0=avg('mfe_R0'),mean_mae_R0=avg('mae_R0'),mean_mfe_ATRpre=avg('mfe_ATRpre'),mean_mfe_price_pct=avg('mfe_price_pct'),small_sample=len(valid)<30))
     files.write_csv(out/'feature_path_associations.csv',grouped)
     contrasts=[]
