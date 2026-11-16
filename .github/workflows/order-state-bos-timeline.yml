@@ -1,0 +1,118 @@
+name: P0 OB BOS first divergence audit (1H and above only)
+
+on:
+  push:
+    branches: ["codex/**"]
+    paths:
+      - "order_state_bos_timeline.py"
+  workflow_dispatch:
+    inputs:
+      baseline_run:
+        description: "Frozen 10-symbol 1H/4H/1D baseline run ID"
+        default: "43820018876"
+        type: string
+      replay_run:
+        description: "Verified original order state replay run ID"
+        default: "43827207508"
+        type: string
+      cause_run:
+        description: "Verified stage-03 cancellation causes run ID"
+        default: "43831710147"
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: p0-bos-first-divergence-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  per_symbol:
+    name: Original BOS timeline ${{ matrix.symbol }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        symbol: [BTCUSDT, ETHUSDT, SOLUSDT]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: "Full unit tests - read-only, no subhour trading"
+        run: python -m unittest -v
+      - name: Retrieve precisely the already-frozen 1H 4H 1D and verified prior ledgers
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_RUN: ${{ github.event.inputs.baseline_run || '43820018876' }}
+          REPLAY_RUN: ${{ github.event.inputs.replay_run || '43827207508' }}
+          CAUSE_RUN: ${{ github.event.inputs.cause_run || '43831710147' }}
+          SYMBOL: ${{ matrix.symbol }}
+        run: |
+          set -euo pipefail
+          for ID in "$BASE_RUN" "$REPLAY_RUN" "$CAUSE_RUN"; do
+            case "$ID" in *[!0-9]*|'') echo 'Only numeric run IDs supported' >&2; exit 1;; esac
+          done
+          mkdir -p data/multi_asset research/order_state_04/baseline research/order_state_04/replay research/order_state_04/causes
+          gh run download "$BASE_RUN" -R "$GITHUB_REPOSITORY" -n "multi-asset-input-$BASE_RUN" -D data/multi_asset
+          gh run download "$BASE_RUN" -R "$GITHUB_REPOSITORY" -n "multi-asset-baseline-$BASE_RUN-$SYMBOL" -D research/order_state_04/baseline
+          gh run download "$REPLAY_RUN" -R "$GITHUB_REPOSITORY" -n "order-state-01-$REPLAY_RUN-$SYMBOL" -D research/order_state_04/replay
+          gh run download "$CAUSE_RUN" -R "$GITHUB_REPOSITORY" -n "order-state-03-$CAUSE_RUN-$SYMBOL" -D research/order_state_04/causes
+      - name: Rebuild each observed as-of BOS direction and compare to the canceled order
+        run: >-
+          python -u order_state_bos_timeline.py analyze "${{ matrix.symbol }}"
+          --data-dir data/multi_asset
+          --replay-dir research/order_state_04/replay
+          --causes-dir research/order_state_04/causes
+          --baseline-dir research/order_state_04/baseline
+          --output-dir research/order_state_04/results
+      - name: Upload all matched timeline and frozen provenance
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: order-state-04-${{ github.run_id }}-${{ matrix.symbol }}
+          path: research/order_state_04/results/*_bos_*
+          if-no-files-found: warn
+          retention-days: 30
+
+  summary:
+    needs: [per_symbol]
+    if: ${{ always() }}
+    name: Validate all 94 mismatch cancellations together
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Retrieve all per-symbol evidence
+        uses: actions/download-artifact@v4
+        with:
+          pattern: order-state-04-${{ github.run_id }}-*
+          path: research/order_state_04/results
+          merge-multiple: true
+      - name: Fail closed if any MTF cancel is missing or inconsistent
+        run: >-
+          python -u order_state_bos_timeline.py aggregate
+          --results-dir research/order_state_04/results
+      - name: Publish structured audit without recommending rule changes
+        if: always()
+        run: |
+          if [ -f research/order_state_04/results/bos_timeline_summary.md ]; then
+            cat research/order_state_04/results/bos_timeline_summary.md
+            cat research/order_state_04/results/bos_timeline_summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'BOS timeline verification incomplete. No performance inference is valid.'
+          fi
+      - name: Upload verified observational summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: order-state-04-verified-${{ github.run_id }}
+          path: research/order_state_04/results/*
+          if-no-files-found: warn
+          retention-days: 30
