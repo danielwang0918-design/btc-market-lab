@@ -1,0 +1,43 @@
+name: P1-05 unchanged canonical P0 signal tapes
+on:
+  push:
+    branches: ["codex/p1-05-portfolio-backtest"]
+    paths: ["p1_portfolio_sources.py", ".github/workflows/p1-05-canonical-tapes.yml"]
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: p1-05-canonical-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  canonical:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        symbol: [BTCUSDT, ETHUSDT, SOLUSDT, ZECUSDT, XRPUSDT, BNBUSDT, NEARUSDT, DOGEUSDT]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - name: Download original frozen history; no market requests
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p /tmp/p1-05-original
+          gh run download 43820018876 -R "$GITHUB_REPOSITORY" \
+            -n multi-asset-input-43820018876 -D /tmp/p1-05-original
+      - name: Rebuild unchanged closed-bar formal strategy signals
+        run: >-
+          python -u p1_portfolio_sources.py tape
+          --symbol ${{ matrix.symbol }} --data-dir /tmp/p1-05-original
+          --tapes research/p1_05_tapes
+      - uses: actions/upload-artifact@v4
+        with:
+          name: p1-05-canonical-${{ github.run_id }}-${{ matrix.symbol }}
+          path: research/p1_05_tapes/*.gz
+          retention-days: 45
+          if-no-files-found: error

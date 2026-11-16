@@ -1,0 +1,120 @@
+name: P1-05 offline capital research and account acceptance
+on:
+  push:
+    branches: ["codex/p1-05-portfolio-backtest"]
+    paths:
+      - "p1_portfolio.py"
+      - "p1_portfolio_study.py"
+      - "test_p1_portfolio*.py"
+      - "P1_05_PROTOCOL.json"
+      - "P1_05_RESEARCH.md"
+      - "P1_05_ACCEPTANCE.md"
+      - "AGENTS.md"
+      - ".github/workflows/p1-05-portfolio.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: p1-05-offline-capital-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  offline-capital:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      MPLCONFIGDIR: /tmp/p1-05-mpl
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - name: Install plotting dependency only; no exchange trading SDK
+        run: python -m pip install matplotlib==3.9.4
+      - name: Verify pre-performance protocol and all Python tests
+        run: |
+          set -euo pipefail
+          mkdir -p research/p1_05_evidence/inputs research/p1_05_evidence/results
+          git show 23a0b5f:P1_05_PROTOCOL.json > /tmp/p1-05-original-protocol.json
+          cmp /tmp/p1-05-original-protocol.json P1_05_PROTOCOL.json
+          python -m unittest -v 2>&1 | tee research/p1_05_evidence/python-tests.log
+      - name: Wait for unchanged eight-symbol canonical signal generation
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run watch 43876225066 -R "$GITHUB_REPOSITORY" --exit-status --interval 30
+      - name: Download pinned research evidence only; no exchange requests
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/p105-p104 /tmp/p105-baseline /tmp/p105-quality /tmp/p105-tapes /tmp/p105-data
+          gh run download 43867291228 -R "$GITHUB_REPOSITORY" \
+            -n p1-04-volume-rvol-evidence-43867291228 -D /tmp/p105-p104
+          gh run download 43820018876 -R "$GITHUB_REPOSITORY" \
+            -n multi-asset-fixed-baseline-43820018876 -D /tmp/p105-baseline
+          gh run download 43864680608 -R "$GITHUB_REPOSITORY" \
+            -n p1-quality-01-verified-43864680608 -D /tmp/p105-quality
+          gh run download 43876225066 -R "$GITHUB_REPOSITORY" \
+            --pattern 'p1-05-canonical-43876225066-*' -D /tmp/p105-tapes
+          python - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile
+          import shutil
+          root=Path('research/p1_05_evidence/inputs');(root/'tapes').mkdir()
+          shutil.copyfile('/tmp/p105-p104/inputs/frozen-source.zip',root/'frozen-source.zip')
+          with ZipFile(root/'frozen-source.zip') as z:z.extractall('/tmp/p105-data')
+          shutil.copyfile('/tmp/p105-p104/results/p1_04_manifest.json',root/'p1_04_manifest.json')
+          shutil.copyfile('/tmp/p105-quality/p1_quality_manifest.json',root/'p1_quality_manifest.json')
+          for name in ['multi_asset_fixed_calendar_trades.csv','multi_asset_fixed_calendar_baseline.json']:
+              shutil.copyfile(Path('/tmp/p105-baseline/research/multi_asset/summary')/name,root/name)
+          for p in Path('/tmp/p105-tapes').rglob('*.json.gz'):
+              dest=root/'tapes'/p.name
+              if dest.exists():raise ValueError('Duplicate canonical tape')
+              shutil.copyfile(p,dest)
+          assert len(list((root/'tapes').glob('*.json.gz')))==8
+          PY
+      - name: Require unchanged original strategy to reproduce all 1340 archived trades
+        run: >-
+          python -u p1_portfolio_sources.py reference --data-dir /tmp/p105-data
+          --tapes research/p1_05_evidence/inputs/tapes
+          --trade-csv research/p1_05_evidence/inputs/multi_asset_fixed_calendar_trades.csv
+          --out-dir research/p1_05_evidence/results
+      - name: Run six offline policies, finite cash, split accounts and sensitivities
+        run: >-
+          python -u p1_portfolio_study.py --data-dir /tmp/p105-data
+          --tapes research/p1_05_evidence/inputs/tapes
+          --trade-csv research/p1_05_evidence/inputs/multi_asset_fixed_calendar_trades.csv
+          --quality-manifest research/p1_05_evidence/inputs/p1_quality_manifest.json
+          --p104-manifest research/p1_05_evidence/inputs/p1_04_manifest.json
+          --out-dir research/p1_05_evidence/results
+      - name: Verify accounts, shared endpoints and absence of live trading
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json,csv
+          root=Path('research/p1_05_evidence/results')
+          m=json.loads((root/'p1_05_manifest.json').read_text())
+          assert m['run_count']==120 and m['independently_checked_accounts']==120
+          assert m['verified_real_spot_trades']==0 and not m['live_execution_implemented'] and not m['new_OOS']
+          assert m['legacy_reproduction']['matches_user_latest_reference']
+          rows=list(csv.DictReader((root/'strategy_comparison.csv').open(encoding='utf-8-sig')))
+          assert len(rows)==120 and all(int(r['trade_count'])<=1000 for r in rows)
+          for period in ['continuous','train','validation','opened_test']:
+              subset=[r for r in rows if r['period']==period]
+              assert len({r['calendar_start_utc'] for r in subset})==1
+              assert len({r['calendar_end_utc'] for r in subset})==1
+          PY
+      - name: Publish Chinese offline research acceptance
+        if: success()
+        run: |
+          cp AGENTS.md P1_05_PROTOCOL.json P1_05_RESEARCH.md P1_05_ACCEPTANCE.md research/p1_05_evidence/
+          cat research/p1_05_evidence/results/P1_05_RESULT_ZH.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: p1-05-offline-capital-evidence-${{ github.run_id }}
+          path: research/p1_05_evidence/
+          retention-days: 45
+          if-no-files-found: error
