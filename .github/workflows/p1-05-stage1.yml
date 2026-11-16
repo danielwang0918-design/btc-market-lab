@@ -1,0 +1,102 @@
+name: P1-05 Stage1 frozen R-ledger capital audit (NO ORDER EXECUTION)
+
+on:
+  push:
+    branches: ["research/p1-05-stage1-audit"]
+    paths:
+      - "p1_05_stage1_audit.py"
+      - "test_p1_05_stage1_audit.py"
+      - ".github/workflows/p1-05-stage1.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: p1-05-stage1-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - name: Run ALL repository unit tests, including new read-only replay guards
+        run: python -m unittest -v
+      - name: Retrieve only existing archived GitHub baseline (never fetch fresh prices)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p research/p1_05_stage1/source
+          gh run download 43820018876 -R "$GITHUB_REPOSITORY" -n multi-asset-fixed-baseline-43820018876 -D research/p1_05_stage1/source
+          python - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile, ZIP_DEFLATED
+          p=Path('research/p1_05_stage1/source')
+          names=[
+            'research/multi_asset/summary/multi_asset_fixed_calendar_baseline.json',
+            'research/multi_asset/summary/multi_asset_fixed_calendar_trades.csv',
+          ]
+          with ZipFile('research/p1_05_stage1/source_frozen.zip','w',ZIP_DEFLATED) as z:
+              for name in names:
+                  z.write(p/name,arcname=name)
+          PY
+      - name: Replay 1,000-USDT paper R ledger without future-outcome selection
+        run: |
+          set -euo pipefail
+          python -u p1_05_stage1_audit.py --baseline-zip research/p1_05_stage1/source_frozen.zip --out-dir research/p1_05_stage1/results
+      - name: Independent outcome conservation and original artifact SHA check
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import csv, json, hashlib
+          p=Path('research/p1_05_stage1/results')
+          data=json.loads((p/'p1_05_stage1_results.json').read_text())
+          assert data['frozen_csv_sha256']=='cc9ae34de758569306e24d7e8cdec79006ef502effeeadc85425e09547a0d0c0'
+          assert data['status']=='reproducible_R_ledger_only_NOT_executable_portfolio'
+          a=data['report']['all_directions']; b=data['report']['spot_long_only']
+          assert a['accepted_trades']==1000 and a['wins']==210
+          assert a['rejection_reasons']=={'position_open':259,'trade_cap':81}
+          assert abs(a['final_equity_usdt']-4.2264772194226685)<1e-8
+          assert b['accepted_trades']==578 and b['wins']==121
+          assert abs(b['final_equity_usdt']-46.25291297824808)<1e-8
+          for scenario in ('all_directions','spot_long_only'):
+              with (p/f'{scenario}_ledger.csv').open(encoding='utf-8',newline='') as f:
+                  rows=list(csv.DictReader(f))
+              with (p/f'{scenario}_decisions.csv').open(encoding='utf-8',newline='') as f:
+                  ds=list(csv.DictReader(f))
+              assert len(rows)==data['report'][scenario]['accepted_trades']
+              assert len(ds)==1340
+              assert sum(d['status']=='accepted' for d in ds)==len(rows)
+              assert abs(float(rows[-1]['equity_after'])-data['report'][scenario]['final_equity_usdt'])<1e-8
+              assert sum(int(d['status']=='rejected') for d in ds)+len(rows)==1340
+          print('P1-05 Stage1 immutable-data replay PASSED')
+          PY
+      - name: Publish summary and unambiguous limitations
+        if: success()
+        run: |
+          python - <<'PY'
+          import json,os
+          from pathlib import Path
+          r=json.loads(Path('research/p1_05_stage1/results/p1_05_stage1_results.json').read_text())['report']
+          s=f"## P1-05 Stage1 paper R-ledger (not a trade execution simulator)\n\n| Scenario | Trades | Win rate | Mean R | Ending $1000 |\n| --- | ---: | ---: | ---: | ---: |\n| All theoretical directions | {r['all_directions']['accepted_trades']} | {r['all_directions']['win_rate_pct']:.2f}% | {r['all_directions']['mean_net_r']:.4f} | {r['all_directions']['final_equity_usdt']:.2f} |\n| Spot-long candidates only | {r['spot_long_only']['accepted_trades']} | {r['spot_long_only']['win_rate_pct']:.2f}% | {r['spot_long_only']['mean_net_r']:.4f} | {r['spot_long_only']['final_equity_usdt']:.2f} |\n\nNo executable lot/notional sizing can be asserted from the frozen R-only CSV. No live orders.\n"
+          print(s)
+          if os.environ.get('GITHUB_STEP_SUMMARY'):
+              Path(os.environ['GITHUB_STEP_SUMMARY']).open('a').write(s)
+          PY
+      - name: Preserve complete ledgers, rejections, and frozen inputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p1-05-stage1-paper-ledger-audit-${{ github.run_id }}
+          path: |
+            research/p1_05_stage1/results/*
+            research/p1_05_stage1/source_frozen.zip
+          if-no-files-found: warn
+          retention-days: 45
