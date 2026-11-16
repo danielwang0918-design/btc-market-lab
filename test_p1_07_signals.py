@@ -56,4 +56,14 @@ class ReferenceTests(unittest.TestCase):
         self.assertEqual(c['entry_time_ms'],t+3600000)
         self.assertEqual(f['entry_time_ms'],t+7200000)
         self.assertEqual(f['stop'],D('123.1'))
+    def test_entry_hour_final_volume_cannot_decide_open_admission(self):
+        t=old.START
+        daily=[b(t-(20-i)*DAY) for i in range(20)];daily[15]=b(t-5*DAY,h=120,l=80)
+        bars=[b(t-3600000),b(t,h=123,l=99,o=100,close=121),b(t+3600000,h=122,l=118,o=121,close=119,v=0)]
+        a=SimpleNamespace(symbol='BTCUSDT',bars=bars,frames={'1d':daily},reg=SimpleNamespace(atr=[1]*3),by_time={x.open_ms:i for i,x in enumerate(bars)},times=[x.open_ms for x in bars])
+        a.stop_context_cache={x.open_ms:dict(feature_cutoff_ms=x.open_ms,atr=1,volatility='normal') for x in bars}
+        rows,_=m.generate(a)
+        candidate=next(r for r in rows if r['policy']=='T20_CONT' and r['edge']=='upper')
+        self.assertEqual(candidate['status'],'eligible')
+        self.assertEqual(candidate['entry_time_ms'],t+3600000)
 if __name__=='__main__':unittest.main()
