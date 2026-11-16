@@ -1,0 +1,129 @@
+name: P0 prospective daily Spot archive (frozen 1H+ research only)
+
+# Scheduled workflows only run from GitHub's default branch (main).
+# The research code is pinned to a vetted commit; it never tracks a moving PR.
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - ".github/workflows/prospective-daily-archive.yml"
+  schedule:
+    - cron: "45 0 * * *"  # 00:45 UTC = 08:45 Taiwan; GitHub schedules may be delayed
+  workflow_dispatch:
+
+permissions:
+  contents: write  # ONLY push a non-force commit to research/prospective-archive-v1
+  actions: read      # Download the pre-registered frozen input and Genesis once
+
+concurrency:
+  group: p0-forward-archive-v1
+  cancel-in-progress: false
+
+jobs:
+  append:
+    if: github.repository == 'danielwang0918-design/btc-market-lab'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout EXACT audited research code, not the moving Draft PR
+        uses: actions/checkout@v4
+        with:
+          ref: e98c32117f7686d18d9e5a489433e0df5e16ed42
+          path: research-src
+          persist-credentials: false
+      - name: Checkout main only for authenticated archival git remote
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: archive-repo
+          fetch-depth: 0
+          persist-credentials: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - name: Verify frozen protocol and all offline tests before any API request
+        working-directory: research-src
+        run: python -m unittest -v
+      - name: Locate archive branch or start independent orphan archive history
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd archive-repo
+          git config user.name 'btc-market-lab-archive-bot'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          if git ls-remote --exit-code --heads origin 'research/prospective-archive-v1' > /dev/null; then
+            git fetch --no-tags origin 'refs/heads/research/prospective-archive-v1'
+            git switch -C research/prospective-archive-v1 FETCH_HEAD
+            echo 'ARCHIVE_EXISTS=true' >> "$GITHUB_ENV"
+          else
+            git switch --orphan research/prospective-archive-v1
+            git rm -rf -q . || true
+            echo 'ARCHIVE_EXISTS=false' >> "$GITHUB_ENV"
+          fi
+      - name: Initialize original 24 SHA-verified CSV files and immutable Genesis once
+        if: env.ARCHIVE_EXISTS == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/p0-forward-seed /tmp/p0-forward-genesis
+          gh run download 43820018876 -R "$GITHUB_REPOSITORY" \
+            -n multi-asset-input-43820018876 -D /tmp/p0-forward-seed
+          gh run download 43845519180 -R "$GITHUB_REPOSITORY" \
+            -n prospective-preregistered-43845519180 -D /tmp/p0-forward-genesis
+          python research-src/prospective_daily_archive.py bootstrap \
+            --lock research-src/PROSPECTIVE_LOCK_V1.json --repo-dir research-src \
+            --seed-source /tmp/p0-forward-seed \
+            --genesis /tmp/p0-forward-genesis/research/prospective_07/prospective_genesis.json \
+            --archive-dir archive-repo/forward_archive
+      - name: Append only fully closed 1D 4H 1H public K-lines (never score trades)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python research-src/prospective_daily_archive.py audit \
+            --lock research-src/PROSPECTIVE_LOCK_V1.json --repo-dir research-src \
+            --archive-dir archive-repo/forward_archive
+          DAY="$(date -u +%Y-%m-%d)"
+          if [[ "$DAY" < '2026-11-17' ]]; then
+            echo 'Preregistered forward period not started: bootstrap-only archive.'
+          elif [[ "$DAY" > '2027-12-31' ]]; then
+            echo 'Preregistered forward period has ended: no new data captured.'
+          else
+            python research-src/prospective_daily_archive.py daily \
+              --lock research-src/PROSPECTIVE_LOCK_V1.json --repo-dir research-src \
+              --archive-dir archive-repo/forward_archive \
+              --asof "${DAY}T00:00:00+00:00"
+            python research-src/prospective_daily_archive.py audit \
+              --lock research-src/PROSPECTIVE_LOCK_V1.json --repo-dir research-src \
+              --archive-dir archive-repo/forward_archive
+          fi
+      - name: Persist SHA-chained data only to non-main archive branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd archive-repo
+          git add -A forward_archive
+          if git diff --cached --quiet; then
+            echo 'Archive verified and unchanged; no duplicate commit.'
+            exit 0
+          fi
+          RECORD="$(python - <<'PY'
+          import json
+          from pathlib import Path
+          print(json.loads(Path('forward_archive/latest.json').read_text())['record_sha256'])
+          PY
+          )"
+          git commit -m "Forward data archive $(date -u +%Y-%m-%d) checkpoint ${RECORD}"
+          # Regular non-force push: reject a concurrent history change or permission failure.
+          git push origin HEAD:refs/heads/research/prospective-archive-v1
+      - name: Upload lightweight audit checkpoint (no API credentials)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p0-forward-archive-checkpoint-${{ github.run_id }}
+          path: |
+            archive-repo/forward_archive/latest.json
+            archive-repo/forward_archive/archive_contract.json
+          if-no-files-found: warn
+          retention-days: 90
