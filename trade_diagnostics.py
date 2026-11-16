@@ -69,7 +69,11 @@ def _trend_alignment(direction: str, context: dict[str, Any]) -> str:
 def excursion_metrics(trade: dict[str, Any], hourly: list[dict[str, str]],
                       open_times: list[int]) -> dict[str, Any]:
     entry_ms, exit_ms = _ms(trade["entry_time_utc"]), _ms(trade["exit_time_utc"])
-    first, last = bisect.bisect_left(open_times, entry_ms), bisect.bisect_right(open_times, exit_ms)
+    # exit_time_utc is an exclusive end boundary (exit candle close + 1 ms).
+    # Its equality to the following candle's open must NOT include that candle.
+    if exit_ms <= entry_ms:
+        raise ValueError("Exit boundary must be later than entry time")
+    first, last = bisect.bisect_left(open_times, entry_ms), bisect.bisect_left(open_times, exit_ms)
     window = hourly[first:last]
     if not window:
         raise ValueError(f"No hourly candles for trade {trade.get('setup_id')}")
@@ -154,14 +158,14 @@ def run_diagnostics(data_dir: Path, input_report: Path, output_json: Path,
             }
         variants[name] = {"trade_count":len(enriched),"splits":splits,"trades":enriched}
     output = {
-        "report_type":"btc_mtf_trade_diagnostics","report_version":1,
+        "report_type":"btc_mtf_trade_diagnostics","report_version":2,
         "strategy":report.get("strategy"),"data":report.get("data"),
         "definitions":{
             "MFE":"Maximum favorable hourly high/low excursion from raw entry between entry and exit.",
             "MAE":"Maximum adverse hourly low/high excursion from raw entry between entry and exit.",
             "MFE_R_and_MAE_R":"Excursion divided by raw entry-to-stop distance.",
             "trend_alignment":"At signal time, last fully closed 4H/daily close vs EMA20 and 3-bar EMA20 slope both agree with trade direction for aligned/opposed; otherwise mixed.",
-            "exit_candle_caveat":"Excursions include the exit candle. OHLC cannot reveal intrabar high/low order, so exit-candle excursions are path-ambiguous.",
+            "exit_candle_caveat":"The exit-time timestamp is exclusive; only bars opened strictly before it are included. Entry/exit candle high-low order and entry fill time cannot be resolved from 1H OHLC.",
             "scope":"Diagnostics describe existing trades only; no strategy rule is changed.",
         },
         "variants":variants,

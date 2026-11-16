@@ -18,6 +18,21 @@ class TradeDiagnosticsTests(unittest.TestCase):
         result=td.excursion_metrics(short,hourly,times)
         self.assertEqual(result["mfe_price"],5.0); self.assertEqual(result["mae_price"],8.0)
 
+    def test_exit_boundary_is_exclusive_and_never_reads_next_candle(self):
+        hourly=[{"open_time":"0","open_time_utc":"entry","high":"102","low":"95"},
+                {"open_time":"3600000","open_time_utc":"AFTER_EXIT","high":"999","low":"1"}]
+        times=[0,3600000]
+        trade={"entry_time_utc":"1970-01-01T00:00:00+00:00",
+               "exit_time_utc":"1970-01-01T01:00:00+00:00","direction":"long",
+               "raw_entry_price":"100","stop_price":"90","setup_id":"boundary"}
+        output=td.excursion_metrics(trade,hourly,times)
+        self.assertEqual(output["bars_in_window"],1)
+        self.assertEqual(output["mfe_price"],2.0)
+        self.assertEqual(output["mae_price"],5.0)
+        self.assertEqual(output["mfe_time_utc"],"entry")
+        with self.assertRaises(ValueError):
+            td.excursion_metrics(dict(trade,exit_time_utc=trade["entry_time_utc"]),hourly,times)
+
     def test_ema_resets_after_gap(self):
         rows=[{"open_time":str(i*100),"close":str(i+1)} for i in range(21)]
         rows.append({"open_time":str(22*100),"close":"22"})
