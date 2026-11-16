@@ -1,0 +1,113 @@
+name: P1-06A immutable stop-loss failure diagnosis
+on:
+  push:
+    branches: ["codex/p1-06a-loss-diagnostics"]
+    paths:
+      - "p1_loss_*.py"
+      - "test_p1_loss_diagnostics.py"
+      - "P1_06A_*.md"
+      - "P1_06A_PROTOCOL.json"
+      - ".github/workflows/p1-06a-loss-diagnostics.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: p1-06a-loss-diagnostics-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      MPLCONFIGDIR: /tmp/p1-06a-mpl
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - run: python -m pip install matplotlib==3.9.4
+      - name: Require fixed diagnostic protocol and untouched baseline files
+        run: |
+          set -euo pipefail
+          git show 2006942:P1_06A_PROTOCOL.json > /tmp/p1-06a-fixed-protocol.json
+          cmp /tmp/p1-06a-fixed-protocol.json P1_06A_PROTOCOL.json
+          git diff --quiet --diff-filter=DMRTUXB 09d9e1cd43eb0e666ce3e4500da97dc5589396e9 -- .
+      - name: Run all Python tests
+        run: |
+          set -euo pipefail
+          mkdir -p research/p1_06a_evidence/inputs research/p1_06a_evidence/results
+          python -m unittest -v 2>&1 | tee research/p1_06a_evidence/python-tests.log
+      - name: Download exact pinned P1-05 ZIP only; no new market data
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api repos/$GITHUB_REPOSITORY/actions/artifacts/14232136572/zip > research/p1_06a_evidence/inputs/p1-05-source.zip
+      - name: Diagnose archived accounts with closed-bar context and uncertain path bounds
+        run: >-
+          python -u p1_loss_study.py
+          --source-zip research/p1_06a_evidence/inputs/p1-05-source.zip
+          --out-dir research/p1_06a_evidence/results
+      - name: Verify coverage, bounds and mutually exclusive endpoint counts
+        run: |
+          python - <<'PY'
+          import csv,json
+          from decimal import Decimal as D
+          from pathlib import Path
+          root=Path('research/p1_06a_evidence/results')
+          manifest=json.loads((root/'p1_06a_manifest.json').read_text())
+          assert manifest['source_accounts_verified']==120 and manifest['source_code_unchanged']
+          assert not any(manifest[k] for k in ['new_OOS','new_strategy_implemented','backtest_rerun_or_parameters_changed','live_execution'])
+          def rows(name):
+              return list(csv.DictReader((root/name).open(encoding='utf-8-sig')))
+          trades=rows('trade_diagnostics.csv')
+          assert {r['model'] for r in trades}=={'fractional_spot','hypothetical_1x_long_short'}
+          assert len({r['trade_key'] for r in trades})==len(trades)==manifest['temporal_feature_rows_verified']
+          assert manifest['frozen_candle_count']==717638 and len(manifest['frozen_source_sha256'])==24
+          for r in trades:
+              for side in ['mfe','mae']:
+                  if r[side+'_price_upper']:
+                      assert D(r[side+'_price_lower'])<=D(r[side+'_price_upper'])
+          post=rows('post_stop_summary.csv')
+          assert {int(r['hours']) for r in post}=={6,12,24,48}
+          for r in post:
+              n=int(r['complete_trades'])
+              assert sum(int(r[k]) for k in ['endpoint_favorable','endpoint_adverse','endpoint_flat'])==n
+              assert all(int(r[k])<=n for k in ['entry_recovered_or_better','original_target_reached','both_directions_order_unresolved'])
+          groups=rows('group_diagnostics.csv')
+          for r in groups:
+              if r['universe']=='all_eight' and r['dimension']=='all':
+                  subset=[t for t in trades if (t['model'],t['period'],t['policy'])==(r['model'],r['period'],r['policy'])]
+                  nstop=sum(t['exit_reason'] in ('stop','stop_gap') for t in subset)
+                  assert nstop==int(r['stop_exits']) and len(subset)==int(r['trades'])
+                  assert sum(D(t['net_pnl_usdt'])<0 for t in subset)==int(r['losses'])
+                  for p in post:
+                      if (p['model'],p['period'],p['policy'],p['universe'],p['entry_year'])==(r['model'],r['period'],r['policy'],'all_eight','all'):
+                          assert sum(int(p[k]) for k in ['complete_trades','split_or_calendar_censored_trades','data_gap_trades','zero_volume_trades'])==nstop
+          from collections import Counter
+          masks=Counter()
+          for r in rows('C_D_joint_failure_masks.csv'):
+              masks[(r['period'],r['policy'],r['universe'],r['side'])]+=int(r['signal_events'])
+          for r in rows('C_D_filter_funnel.csv'):
+              if r['stage']=='feature_stage_offers':
+                  assert masks[(r['period'],r['policy'],r['universe'],r['side'])]==int(r['signal_events'])
+          assert len(rows('post_stop_observations.csv'))==len(trades)*4
+          (root/'acceptance.json').write_text(json.dumps(dict(source_accounts=120,closed_context_rows=len(trades),post_stop_rows=len(trades)*4,
+              source_unchanged=True,bounds_and_endpoint_counts_verified=True,stop_loss_denominators_verified=True,
+              all_C_D_failure_masks_preserved=True,live_execution=False,new_OOS=False),indent=2)+'\n')
+          assert (root/'P1_06A_REPORT_ZH.md').is_file() and (root/'P1_06A_TABLES_ZH.md').is_file()
+          PY
+      - name: Publish full Chinese diagnosis and preserve methods
+        run: |
+          cp AGENTS.md P1_06A_PROTOCOL.json P1_06A_METHODS.md P1_06A_ACCEPTANCE.md research/p1_06a_evidence/
+          cat research/p1_06a_evidence/results/P1_06A_REPORT_ZH.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: p1-06a-loss-diagnosis-${{ github.run_id }}
+          path: research/p1_06a_evidence/
+          retention-days: 45
+          if-no-files-found: error

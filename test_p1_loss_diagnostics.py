@@ -1,8 +1,11 @@
 import copy
+import tempfile
 import unittest
 from decimal import Decimal as D
+from pathlib import Path
 import p1_candlestick_research as core
 import p1_loss_diagnostics as m
+import p1_loss_study as study
 
 H = 3600000
 
@@ -229,6 +232,77 @@ class FilterAndSummaryTests(unittest.TestCase):
     def test_source_manifest_wrong_commit_is_rejected(self):
         with self.assertRaisesRegex(ValueError,'source commit'):
             m.validate_manifest({'current_commit':'future'})
+
+
+class ArchivedAccountTests(unittest.TestCase):
+    def setUp(self):
+        self.trade=trade(quantity='1',equity_before='1000',cash_required='100.15005',
+            planned_risk='10.285005',risk_budget='20',fees_usdt='.190005',slippage_usdt='.095',
+            net_pnl_usdt='-10.285005',r_multiple='-1',equity_after='989.714995',
+            signal_time_ms='0',feature_cutoff_ms='0')
+        self.summary=dict(model='fractional_spot',trade_count='1',wins='0',losses='1',
+            maximum_drawdown_pct='1.0285005',calendar_start_utc='1970-01-01T00:00:00+00:00',
+            calendar_end_utc='1970-01-01T03:00:00+00:00',terminal_position_unresolved='False',
+            final_equity_USDT='989.714995')
+        self.curve=[dict(time_ms=0,equity_usdt='1000'),dict(time_ms=3*H,equity_usdt='989.714995')]
+        self.signals=[dict(event='entered'),dict(event='position_closed')]
+
+    def test_archive_cash_curve_and_signal_counts_are_independently_reconciled(self):
+        self.assertTrue(study.audit_account(self.summary,[self.trade],self.curve,self.signals)['all_cost_cash_R_counts_and_endpoints_match'])
+
+    def test_future_archived_cutoff_cannot_pass_census(self):
+        with self.assertRaisesRegex(ValueError,'future signal'):
+            study.audit_account(self.summary,[{**self.trade,'feature_cutoff_ms':'1'}],self.curve,self.signals)
+
+    def test_missing_rejection_signal_accounting_is_not_silently_accepted(self):
+        with self.assertRaisesRegex(ValueError,'signal/trade'):
+            study.audit_account(self.summary,[self.trade],self.curve,self.signals[:1])
+
+    def test_unknown_terminal_position_is_not_relabelled_cash(self):
+        with self.assertRaisesRegex(ValueError,'terminal'):
+            study.audit_account({**self.summary,'terminal_position_unresolved':'True'},[self.trade],self.curve,self.signals)
+
+    def test_unpinned_source_archive_fails_before_any_analysis(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp)/'source.zip';path.write_bytes(b'not the source')
+            with self.assertRaisesRegex(ValueError,'archive SHA256'):
+                study.run(path,Path(tmp)/'results')
+
+
+class ConfirmationGeometryTests(unittest.TestCase):
+    def test_confirmation_entry_movement_is_not_execution_slippage(self):
+        registered=dict(entry_reference='100',SL='90',TP1='120',net_RR='1.91249392',time_ms='0')
+        t=trade(raw_entry='105',entry_time_ms=str(H))
+        x=m.confirmation_geometry(t,registered,registered)
+        self.assertGreater(x['confirmation_entry_price_drift_pct'],0)
+        self.assertLess(x['RR_change_from_original_reference'],0)
+        self.assertFalse(x['logged_RR_matches_actual_entry_approx'])
+        self.assertEqual(x['entry_delay_from_registration_hours'],1)
+
+    def test_original_edge_and_2b_buffer_change_are_disclosed_separately(self):
+        registered=dict(entry_reference='100',SL='90',TP1='120',net_RR='1.91249392',time_ms='0')
+        x=m.confirmation_geometry(trade(stop='89'),registered,registered)
+        self.assertTrue(x['stop_extended_beyond_original_OB_edge'])
+        self.assertEqual(x['confirmation_entry_price_drift_pct'],0)
+
+    def test_registration_cannot_come_after_entry(self):
+        r=dict(entry_reference='100',SL='90',TP1='120',net_RR='2',time_ms=str(H))
+        with self.assertRaisesRegex(ValueError,'registration'):
+            m.confirmation_geometry(trade(),r,r)
+
+
+class ReportingDenominatorTests(unittest.TestCase):
+    def test_post_stop_counts_do_not_mix_models_or_entry_years(self):
+        t=trade(exit_time_ms=str(H))
+        a=m.post_stop_window(t,[bar(i*H,o=90,h=95,l=85,c=91) for i in range(1,7)],6,8*H)
+        rows=[dict(a,model=model,period='continuous',policy='A',symbol='BTCUSDT',coin_group='BTC',entry_year=year)
+              for model,year in [('fractional_spot','2020'),('hypothetical_1x_long_short','2021')]]
+        out=study.post_tables(rows,['BTCUSDT','ETHUSDT'])
+        def find(model,year):
+            return next(r for r in out if r['model']==model and r['period']=='continuous' and r['policy']=='A' and r['hours']==6 and r['universe']=='BTC' and r['entry_year']==year)
+        self.assertEqual(find('fractional_spot','all')['complete_trades'],1)
+        self.assertEqual(find('fractional_spot','2021')['complete_trades'],0)
+        self.assertEqual(find('hypothetical_1x_long_short','2021')['complete_trades'],1)
 
 
 if __name__=='__main__':
