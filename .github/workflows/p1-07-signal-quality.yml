@@ -1,0 +1,112 @@
+name: P1-07 frozen mechanism and independent signal quality
+on:
+  push:
+    branches: ["codex/p1-07-signal-quality"]
+    paths: ["p1_07_*.py", "test_p1_07_*.py", "P1_07_*", ".github/workflows/p1-07-signal-quality.yml"]
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: p1-07-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      MPLCONFIGDIR: /tmp/p1-07-mpl
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install matplotlib==3.10.8 numpy==2.3.5 scipy==1.17.0 scikit-learn==1.8.0
+      - name: Require fixed preregistration and unchanged baseline
+        run: |
+          set -euo pipefail
+          git show 361c47c:P1_07_PROTOCOL.json > /tmp/p1-07-fixed.json
+          cmp /tmp/p1-07-fixed.json P1_07_PROTOCOL.json
+          git diff --quiet --diff-filter=DMRTUXB df203cca3adbb37b11118c1725cf36cbc9fffe41 -- .
+      - name: All Python tests
+        run: |
+          set -euo pipefail
+          mkdir -p research/p1_07_evidence/inputs research/p1_07_evidence/results
+          python -m unittest -v 2>&1 | tee research/p1_07_evidence/python-tests.log
+      - name: Exact archived source only; no exchange data requests
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api repos/$GITHUB_REPOSITORY/actions/artifacts/14242585512/zip > research/p1_07_evidence/inputs/p1-06b-source.zip
+      - name: Read frozen mechanisms and run only new daily hypotheses and meta gates
+        run: >-
+          python -u p1_07_study.py --source-zip research/p1_07_evidence/inputs/p1-06b-source.zip
+          --out-dir research/p1_07_evidence/results
+      - name: Cross-file independent acceptance
+        run: |
+          python - <<'PY'
+          import csv,json,hashlib
+          from pathlib import Path
+          from decimal import Decimal as D
+          root=Path('research/p1_07_evidence/results')
+          def rows(name):return list(csv.DictReader((root/name).open(encoding='utf-8-sig')))
+          m=json.loads((root/'p1_07_manifest.json').read_text())
+          assert m['new_account_runs']==96 and m['old_six_strategy_replays']==0
+          assert not m['new_OOS'] and not m['live_execution']
+          assert len(m['frozen_source_sha256'])==24 and m['frozen_candle_count']==717638
+          for name,digest in m['output_sha256'].items():assert hashlib.sha256((root/name).read_bytes()).hexdigest()==digest,name
+          correction=json.loads(Path('P1_07_CAUSAL_CORRECTION.json').read_text())
+          for name,comparison in correction['comparison'].items():
+              if name=='ai/meta_predictions.csv':continue
+              assert hashlib.sha256((root/name).read_bytes()).hexdigest()==comparison['after_sha256'],name
+          # BLAS/CPU last-bit differences must not be confused with changed
+          # evidence. Keep the original full-precision CSV and per-run digest;
+          # only the cross-host probability comparison uses 12 decimals.
+          cross=correction['cross_environment_prediction_comparison']
+          canonical=rows('ai/meta_predictions.csv')
+          for row in canonical:
+              row['probability']=format(D(row['probability']),'.12f') if row['probability'] else ''
+          canonical_sha=hashlib.sha256(json.dumps(canonical,sort_keys=True,ensure_ascii=False,separators=(',',':')).encode()).hexdigest()
+          assert canonical_sha==cross['canonical_sha256']
+          source_events=rows('new_signal_events.csv')
+          ids={r['event_id'] for r in source_events}
+          assert len(source_events)==2*len(ids)
+          for r in source_events:
+              if r['status']=='eligible':
+                  assert int(r['reference_closed_ms'])<=int(r['confirmation_open_ms'])
+                  assert int(r['confirmation_open_ms'])+3600000==int(r['entry_time_ms'])
+                  assert int(r['feature_cutoff_ms'])<=int(r['entry_time_ms'])
+                  assert D(r['reference_age_days'])>=4
+                  assert D(r['known_day_low'])<=D(r['known_day_high'])
+          pred=rows('ai/meta_predictions.csv')
+          assert len(pred)==525 and len({r['event_id'] for r in pred})==525
+          model=json.loads((root/'ai/meta_model.json').read_text())
+          assert model['threshold']==.5 and model['training_rows']>=200 and model['train_only_imputation_and_scaling']
+          gate=rows('meta_gate_opportunities.csv')
+          future_quality={r['event_id'] for r in rows('ai/ai_opportunity_audit.csv') if r['audit_status'] in ('path_dependent_label','gap_or_zero_volume_label') and r['side']=='long'}
+          for r in gate:
+              if r['event_id'] in future_quality and r['policy']=='FIXED_COST25':
+                  decision=next(p for p in pred if p['event_id']==r['event_id'])
+                  assert (r['status']=='eligible')==(decision['accept_fixed']=='True')
+          acct=rows('portfolio_comparison.csv');assert len(acct)==96
+          assert all(int(r['trade_count'])<=1000 for r in acct)
+          for period in ('continuous','train','validation','opened_test'):
+              assert len({r['calendar_end_utc'] for r in acct if r['period']==period})==1
+          mech=json.loads((root/'mechanism/manifest.json').read_text())
+          assert mech['no_strategy_replay'] and mech['all_arithmetic_identities_pass']
+          (root/'acceptance.json').write_text(json.dumps(dict(new_accounts=96,old_strategy_replays=0,source_and_outputs_verified=True,
+              daily_reference_and_confirmation_times_verified=True,future_label_quality_not_used_for_admission=True,
+              mechanism_identities_verified=True,new_OOS=False,live_execution=False),indent=2)+'\n')
+          PY
+      - name: Publish Chinese research and locked methods
+        run: |
+          cp AGENTS.md P1_07_PROTOCOL.json P1_07_RESEARCH_SPEC.md P1_07_ACCEPTANCE.md P1_07_AI_FEASIBILITY.md P1_07_CAUSAL_CORRECTION.json research/p1_07_evidence/
+          cat research/p1_07_evidence/results/P1_07_RESULT_ZH.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: p1-07-signal-quality-${{ github.run_id }}
+          path: research/p1_07_evidence/
+          retention-days: 45
+          if-no-files-found: error

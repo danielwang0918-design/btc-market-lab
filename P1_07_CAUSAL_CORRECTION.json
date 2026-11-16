@@ -1,0 +1,65 @@
+{
+  "scope": "Post-result causal correction audit; not a performance selection criterion or parameter search",
+  "source_zip_sha256": "2b416875856defb20e714d366d3e4b61a22283cac8432e0f11131fdab00ece00",
+  "before": "Initial full local fixed-protocol outputs, also reproduced by first successful CI run 43964244562",
+  "red_test_commit": "99c693b",
+  "correction": "Entry-hour final volume must not decide admission at its open; future zero volume remains an outcome quality flag",
+  "comparison": {
+    "new_signal_events.csv": {
+      "before_rows": 6844,
+      "after_rows": 6844,
+      "changed_rows": 0,
+      "before_sha256": "7105784edfdc6b8923b701b7f90d9e328fc47ede43288766278a690b14bcb782",
+      "after_sha256": "7105784edfdc6b8923b701b7f90d9e328fc47ede43288766278a690b14bcb782",
+      "first_changes": []
+    },
+    "new_isolated_outcomes.csv": {
+      "before_rows": 5604,
+      "after_rows": 5604,
+      "changed_rows": 0,
+      "before_sha256": "8945f70900cba1324d2475481f99d0efdb0ab7c64c8af6087aa6d84a7948e911",
+      "after_sha256": "8945f70900cba1324d2475481f99d0efdb0ab7c64c8af6087aa6d84a7948e911",
+      "first_changes": []
+    },
+    "new_same_event_pairs.csv": {
+      "before_rows": 32,
+      "after_rows": 32,
+      "changed_rows": 0,
+      "before_sha256": "bc2f5385c24d57d1964998fb2b0612509de18ce755074773bd715f2918cc2563",
+      "after_sha256": "bc2f5385c24d57d1964998fb2b0612509de18ce755074773bd715f2918cc2563",
+      "first_changes": []
+    },
+    "portfolio_comparison.csv": {
+      "before_rows": 96,
+      "after_rows": 96,
+      "changed_rows": 0,
+      "before_sha256": "888718d4a02c6c846dfd5796e59a5af93311f6a67309d78a0604ce94b77991a9",
+      "after_sha256": "888718d4a02c6c846dfd5796e59a5af93311f6a67309d78a0604ce94b77991a9",
+      "first_changes": []
+    },
+    "portfolio_breakdowns.csv": {
+      "before_rows": 1728,
+      "after_rows": 1728,
+      "changed_rows": 0,
+      "before_sha256": "7c45e11fe5d44c15a14e581b8de97432ef028c0866fb801377dc6ba46b6987d0",
+      "after_sha256": "7c45e11fe5d44c15a14e581b8de97432ef028c0866fb801377dc6ba46b6987d0",
+      "first_changes": []
+    },
+    "ai/meta_predictions.csv": {
+      "before_rows": 525,
+      "after_rows": 525,
+      "changed_rows": 0,
+      "before_sha256": "8ff0373f3578a8bc296714dbe8bb5e863a881d741597cc8a1ce4a25471e56f80",
+      "after_sha256": "8ff0373f3578a8bc296714dbe8bb5e863a881d741597cc8a1ce4a25471e56f80",
+      "first_changes": []
+    }
+  },
+  "cross_environment_prediction_comparison": {
+    "reason": "Observed 131 probability-only last-bit differences in run43966253569; maximum absolute delta1.3877787807814457e-16, no feature, ID or decision changes",
+    "probability_decimal_places": 12,
+    "canonical_sha256": "4568371497fc4898f8b5c663744b33edb3381b033614126e00d7496da99c75a3",
+    "method": "CSV string rows in original order; only probability formatted with Decimal .12f; JSON sorted keys, ensure_ascii=False, separators comma/colon; SHA256 UTF8",
+    "preserve_full_precision_csv_and_per_run_sha256": true,
+    "other_five_CSVs_remain_byte_exact": true
+  }
+}
