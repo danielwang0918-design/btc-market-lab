@@ -93,6 +93,11 @@ class RvolTests(unittest.TestCase):
         self.assertTrue(f['extreme_rvol'])
         self.assertEqual(f['rvol_bin'],'high')
 
+    def test_extreme_rolloff_does_not_cancel_tiny_prior_volumes(self):
+        f=m.VolumeSource(bars([Decimal('1e30')]+[Decimal('1e-30')]*21),'1h').feature_at(21)
+        self.assertEqual(f['prior_mean_volume'],Decimal('1e-30'))
+        self.assertEqual(f['rvol'],1)
+
     def test_twenty_bars_on_each_allowed_frame(self):
         for frame in core.FRAMES:
             source=m.VolumeSource(bars([1]*20+[2],frame),frame)
@@ -244,6 +249,15 @@ class JoinAndStatisticsTests(unittest.TestCase):
         self.assertEqual(len(rows),6)
         self.assertEqual(sum(r['observed_events'] for r in rows),1)
         self.assertTrue(all(r['mean_paper_net_pct'] is None for r in rows if r['rvol_bin']!='low'))
+
+    def test_symbol_stability_counts_unrounded_mean_signs(self):
+        positive=m.Stats();negative=m.Stats();empty=m.Stats()
+        positive.add(observation(net='0.00000001'));positive.add(observation(net='0'))
+        negative.add(observation(net='-0.00000001'));negative.add(observation(net='0'))
+        out=m.stability_metrics([positive,negative,empty])
+        self.assertEqual(out['symbols_with_evaluated_events'],2)
+        self.assertEqual(out['symbols_positive_mean'],1)
+        self.assertEqual(out['symbols_negative_mean'],1)
 
 
 if __name__=='__main__':unittest.main()
