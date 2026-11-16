@@ -99,6 +99,12 @@ def training_rows(n=200):
 
 
 class MetaTests(unittest.TestCase):
+    def test_model_cannot_trade_before_its_training_cutoff(self):
+        prediction={'accept_ml':'True','accept_fixed':'True'}
+        self.assertFalse(m.accept_for_entry(prediction,'accept_ml',m.VALIDATION-1))
+        self.assertTrue(m.accept_for_entry(prediction,'accept_ml',m.VALIDATION))
+        self.assertTrue(m.accept_for_entry(prediction,'accept_fixed',m.VALIDATION-1))
+
     def test_sample_gate_does_not_fabricate_probabilities(self):
         state,predictions,scores=m.fit_meta(training_rows(199))
         self.assertFalse(state['model_trained'])

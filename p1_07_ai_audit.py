@@ -120,6 +120,10 @@ def meta_features(row):
         normal_stop_cost_share=float(row['normal_stop_cost_fraction']) if number(row.get('normal_stop_cost_fraction')) is not None else None,
         log1p_known_registration_delay=math.log1p(float(delay)) if delay is not None and delay>=0 else None)
 
+def accept_for_entry(prediction, flag, entry_time_ms):
+    return prediction is not None and prediction[flag] in (True, 'True')
+
+
 def fit_meta(rows):
     """One fixed train-only fit. Future label quality never enters prediction admission."""
     pool=[r for r in rows if r['side']=='long' and r['source_status']=='eligible']

@@ -127,7 +127,7 @@ def _run(source_zip,out):
                 if p['status']=='eligible':
                     prediction=pred.get(p['event_id'])
                     if p['side']!='long':p['status']='spot_short_unavailable'
-                    elif prediction is None or prediction[flag]!='True':p['status']='meta_watch_or_rejected'
+                    elif not ai.accept_for_entry(prediction,flag,p['entry_time_ms']):p['status']='meta_watch_or_rejected'
                     # Future ambiguity flags never participate in this admission gate.
                     if p['status']=='eligible':gatepaths[p['event_id']+'|'+policy]=old_paths[p['event_id']]
                 gateplans.append(p)
