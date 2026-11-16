@@ -171,6 +171,8 @@ def run(source_zip,out):
         return _run(source_zip,out)
 
 def _run(source_zip,out):
+    if out.exists() and any(out.iterdir()):
+        raise ValueError('Output directory must be empty; use a new folder to prevent stale evidence')
     root=Path(__file__).parent;out.mkdir(parents=True,exist_ok=True)
     if util.sha((root/'P1_06B_PROTOCOL.json').read_bytes())!=m.PROTOCOL_SHA:raise ValueError('Pre-performance protocol changed')
     if util.sha(source_zip.read_bytes())!=P106_SHA:raise ValueError('P1-06A source ZIP SHA256 mismatch')

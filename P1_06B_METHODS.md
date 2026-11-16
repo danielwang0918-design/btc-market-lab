@@ -58,3 +58,5 @@
 ## 重現
 
 `python -m unittest -v`；`python -u p1_stop_study.py --source-zip p1-06a-source.zip --out-dir results`。Artifact包含完整來源ZIP、候選／拒絕清單、每事件路徑結果、孤立事件及配對對照、完整帳戶交易／曲線、中文報告、測試及全部來源與程式SHA256。
+
+輸出資料夾必須為全新或空資料夾；程式在讀取來源前拒絕非空目錄，避免重跑時混入舊manifest／舊證據，也不自動刪除既有輸出。每次重現改用新的輸出路徑。

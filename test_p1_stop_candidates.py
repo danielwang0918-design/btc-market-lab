@@ -1,4 +1,6 @@
 import unittest
+import tempfile
+from pathlib import Path
 from decimal import Decimal as D
 import p1_candlestick_research as core
 import p1_stop_candidates as m
@@ -146,5 +148,15 @@ class AccountTests(unittest.TestCase):
         r=m.ledger(ps,x,'A','fractional_spot','source_slip15',0,2*H,{'AAA':Fake(),'BBB':Fake()})
         expected=m.net_unit(D(100),D(120),'long',D(15))/-m.net_unit(D(100),D(90),'long',D(15))
         self.assertEqual(r['trades'][0]['cost_scenario_target_RR'],expected)
+
+class EvidenceIntegrityTests(unittest.TestCase):
+    def test_stale_evidence_is_rejected_and_preserved_before_source_processing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);source=root/'source.zip';source.write_bytes(b'unverified source')
+            out=root/'results';out.mkdir();old=out/'p1_06b_manifest.json';old.write_text('{"obsolete":true}')
+            with self.assertRaisesRegex(ValueError,'empty'):
+                study.run(source,out)
+            self.assertEqual(old.read_text(),'{"obsolete":true}')
+            self.assertEqual(len(list(out.iterdir())),1)
 
 if __name__=='__main__':unittest.main()
