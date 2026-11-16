@@ -1,0 +1,129 @@
+name: P1-01 review acceptance (frozen before and after)
+
+on:
+  push:
+    branches: ["codex/p1-01-review-*"]
+    paths:
+      - "p1_candlestick_research.py"
+      - "p1_01_review_audit.py"
+      - "test_p1_candlestick_research.py"
+      - "test_p1_01_review_audit.py"
+      - "P1_01_REVIEW_ACCEPTANCE.md"
+      - "P1_01_CANDLESTICK_RESEARCH.md"
+      - ".github/workflows/p1-candlestick-review.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: p1-01-review-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  review-acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout independent review branch and pinned original revision
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Run complete offline Python suite
+        run: |
+          set -euo pipefail
+          mkdir -p research/p1_01_review
+          python -m unittest -v 2>&1 | tee research/p1_01_review/python-tests.log
+      - name: Preserve original detector and reproduce seven numerical and fill failures
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/p1-review-baseline
+          git show 54c4cd08b8bfb911a65e12f195102f34caf52623:p1_candlestick_research.py \
+            > /tmp/p1-review-baseline/p1_candlestick_research.py
+          cp test_p1_candlestick_research.py /tmp/p1-review-baseline/
+          cp /tmp/p1-review-baseline/p1_candlestick_research.py research/p1_01_review/original_detector.py
+          python - <<'PY'
+          import sys,unittest
+          sys.path.insert(0,'/tmp/p1-review-baseline')
+          import test_p1_candlestick_research as tests
+          names=['test_exact_bullish_engulfing_40_percent_boundary',
+                 'test_exact_bearish_engulfing_40_percent_boundary',
+                 'test_exact_morning_star_50_percent_boundary',
+                 'test_exact_soldiers_upper_wick_half_body_boundary',
+                 'test_exact_crows_lower_wick_half_body_boundary',
+                 'test_zero_volume_next_open_cannot_be_a_paper_fill',
+                 'test_zero_volume_exit_is_not_classified_as_win_or_loss']
+          suite=unittest.TestSuite(tests.StudyTests(name) for name in names)
+          with open('research/p1_01_review/baseline-regressions-expected-red.log','w') as f:
+              result=unittest.TextTestRunner(stream=f,verbosity=2).run(suite)
+          assert result.testsRun==7 and len(result.failures)==7 and not result.errors
+          print('Confirmed all seven numerical / fixed-fill regressions fail on the pinned original code.')
+          PY
+      - name: Download identical frozen source (never refetch Binance history)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/p1-review-history
+          gh run download 43820018876 -R "$GITHUB_REPOSITORY" \
+            -n multi-asset-input-43820018876 -D /tmp/p1-review-history
+          python - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile,ZIP_DEFLATED
+          with ZipFile('research/p1_01_review/frozen-source.zip','w',compression=ZIP_DEFLATED) as z:
+              for path in sorted(Path('/tmp/p1-review-history').glob('*')):
+                  if path.is_file():z.write(path,arcname=path.name)
+          PY
+      - name: Reproduce original PR 7 results without changing its source
+        run: >-
+          python -u /tmp/p1-review-baseline/p1_candlestick_research.py
+          --frozen-archive research/p1_01_review/frozen-source.zip
+          --lock PROSPECTIVE_LOCK_V1.json
+          --out-dir research/p1_01_review/before
+      - name: Run corrected frozen eight-asset study
+        run: >-
+          python -u p1_candlestick_research.py
+          --frozen-archive research/p1_01_review/frozen-source.zip
+          --lock PROSPECTIVE_LOCK_V1.json
+          --out-dir research/p1_01_review/after
+      - name: Verify every original row and exact v1 geometry; compare every group
+        run: >-
+          python -u p1_01_review_audit.py
+          --before research/p1_01_review/before
+          --after research/p1_01_review/after
+          --archive research/p1_01_review/frozen-source.zip
+          --baseline-code /tmp/p1-review-baseline/p1_candlestick_research.py
+          --lock PROSPECTIVE_LOCK_V1.json
+          --out-dir research/p1_01_review/comparison
+      - name: Publish review evidence index
+        if: always()
+        run: |
+          mkdir -p research/p1_01_review
+          cp P1_01_REVIEW_ACCEPTANCE.md research/p1_01_review/
+          python - <<'PY'
+          import json,os
+          from pathlib import Path
+          p=Path('research/p1_01_review/comparison/p1_01_review_audit.json')
+          if p.exists():
+              r=json.loads(p.read_text())
+              with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as f:
+                  f.write('# P1-01 review acceptance\n\n')
+                  f.write(f"Original events: {r['before']['unique_pattern_events']}; corrected: {r['after']['unique_pattern_events']}.\n\n")
+                  f.write(f"Unchanged original rows: {r['common_legacy_rows_byte_for_field_identical']}; added horizon rows: {r['added_horizon_rows']}.\n\n")
+                  f.write(f"Original rows reclassified for zero-volume fills: {r['common_rows_reclassified_zero_volume_fill']}.\n\n")
+                  f.write('All 24 source digests and 1,080 summary groups verified.\n\n')
+                  f.write('**Exploratory overlapping event outcomes, not executable win rates or new OOS validation.**\n')
+          PY
+      - name: Preserve original and corrected data, all comparisons and test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p1-01-review-evidence-${{ github.run_id }}
+          path: research/p1_01_review/
+          retention-days: 30
+          if-no-files-found: error

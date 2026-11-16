@@ -52,3 +52,11 @@ python p1_candlestick_research.py \
 預期輸出：`p1_01_manifest.json`、`p1_01_summary.json`、`p1_01_summary.csv`、`p1_01_events.csv`。GitHub workflow 以同一 Frozen Run 的 Artifact 重新跑一次，輸出獨立 CI 證據。
 
 **後續**：不動既有正式策略／main；P1-02 使用事前明確定義的支撐壓力區比較「型態有無出現在關鍵位置」的差異，先提出假設與驗收標準，再回測。P0 前瞻研究繼續原封不動。
+
+## P1-01 審查修正版 v1.1
+
+上方第一輪數據與規格記錄保留，完整修正前後比較見 [P1_01_REVIEW_ACCEPTANCE.md](P1_01_REVIEW_ACCEPTANCE.md)。修正版只修正 v1 門檻的浮點誤判及不可估算的零量模擬成交，並補全資料驗證與報表；型態門檻、期限、費率均未調整。
+
+修正後 106,433 個事件（+278），319,299 列期限觀察，311,873 列可評估；7,402 列缺口／邊界／追蹤不足、24 列零量固定時點成交不足。零量觀察保留事件，結果不算輸贏，沒有用未來成交量篩選訊號。摘要新增 `paper_fill_unavailable`，計數為 `observed_signals = evaluated + right_censored + paper_fill_unavailable`，完整 1,080 組包含 45 組零事件。
+
+依本次使用者授權範圍，**P1-02 暫不進行**，上述後續構想不代表本次要開發或改動正式策略。
