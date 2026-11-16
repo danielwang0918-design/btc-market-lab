@@ -1,0 +1,96 @@
+name: P1-06B fixed candidate control and capital research
+on:
+  push:
+    branches: ["codex/p1-06b-stop-improvement"]
+    paths:
+      - "p1_stop_*.py"
+      - "test_p1_stop_candidates.py"
+      - "P1_06B_*"
+      - ".github/workflows/p1-06b-candidate-research.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: p1-06b-candidates-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      MPLCONFIGDIR: /tmp/p1-06b-mpl
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - run: python -m pip install matplotlib==3.9.4
+      - name: Require preregistered candidates and unchanged existing files
+        run: |
+          set -euo pipefail
+          git show 2df7d75:P1_06B_PROTOCOL.json > /tmp/p1-06b-fixed.json
+          cmp /tmp/p1-06b-fixed.json P1_06B_PROTOCOL.json
+          git diff --quiet --diff-filter=DMRTUXB 5d4235d0ac22677d7040bc5e510a3082defdca18 -- .
+      - name: Run complete Python tests
+        run: |
+          set -euo pipefail
+          mkdir -p research/p1_06b_evidence/inputs research/p1_06b_evidence/results
+          python -m unittest -v 2>&1 | tee research/p1_06b_evidence/python-tests.log
+      - name: Download pinned P1-06A evidence only; no exchange requests
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api repos/$GITHUB_REPOSITORY/actions/artifacts/14237540537/zip > research/p1_06b_evidence/inputs/p1-06a-source.zip
+      - name: Verify baseline then fixed event controls then portfolio accounts
+        run: >-
+          python -u p1_stop_study.py
+          --source-zip research/p1_06b_evidence/inputs/p1-06a-source.zip
+          --out-dir research/p1_06b_evidence/results
+      - name: Independent cross-file acceptance and fixed comparison coverage
+        run: |
+          python - <<'PY'
+          import csv,json,hashlib
+          from pathlib import Path
+          from decimal import Decimal as D
+          root=Path('research/p1_06b_evidence/results')
+          def rows(name):return list(csv.DictReader((root/name).open(encoding='utf-8-sig')))
+          m=json.loads((root/'p1_06b_manifest.json').read_text())
+          assert m['baseline_accounts_reconciled']==8 and m['account_runs']==224
+          assert m['source_code_unchanged'] and not m['new_OOS'] and not m['live_execution']
+          assert len(m['frozen_source_sha256'])==24 and m['frozen_candle_count']==717638
+          for name,digest in m['output_sha256'].items():assert hashlib.sha256((root/name).read_bytes()).hexdigest()==digest
+          accounts=rows('portfolio_comparison.csv')
+          assert len(accounts)==224 and all(int(r['trade_count'])<=1000 for r in accounts)
+          assert {r['scenario'] for r in accounts}=={'source_stop_first','feasible_lower','feasible_upper','source_slip15'}
+          for period in ['continuous','train','validation','opened_test']:
+              assert len({r['calendar_end_utc'] for r in accounts if r['period']==period})==1
+          plans=rows('candidate_events.csv');original={r['event_id']:r for r in plans if r['policy']=='A'}
+          for p in plans:
+              if p['policy']!='I_SWEEP20' and p['status']=='eligible':
+                  assert D(p['target'])==D(original[p['event_id']]['target'])
+                  assert int(p['feature_cutoff_ms'])<=int(p['entry_time_ms'])
+          outcomes=rows('event_outcomes.csv')
+          assert len(outcomes)==4*sum(p['status']=='eligible' for p in plans)
+          for t in outcomes:
+              assert D(t['planned_risk'])<=D('20.000000000001') and D(t['cash_required'])<=D('1000.000000000001')
+          assert len(rows('paired_control_comparison.csv'))==160
+          assert all(r['all_core_fields_match_1e_12'] for r in json.loads((root/'baseline_reconciliation.json').read_text()))
+          (root/'acceptance.json').write_text(json.dumps(dict(baseline_accounts=8,account_runs=224,
+              original_TP_preserved=True,normal_risk_and_cash_caps_verified=True,all_scenarios_and_pairs_preserved=True,
+              no_parameter_retuning=True,new_OOS=False,live_execution=False),indent=2)+'\n')
+          PY
+      - name: Preserve Chinese report, protocol and methods
+        run: |
+          cp AGENTS.md P1_06B_PROTOCOL.json P1_06B_METHODS.md P1_06B_ACCEPTANCE.md research/p1_06b_evidence/
+          cat research/p1_06b_evidence/results/P1_06B_REPORT_ZH.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: p1-06b-candidate-evidence-${{ github.run_id }}
+          path: research/p1_06b_evidence/
+          retention-days: 45
+          if-no-files-found: error
