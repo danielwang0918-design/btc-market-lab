@@ -103,7 +103,7 @@ class ExcursionTests(unittest.TestCase):
 class PostStopTests(unittest.TestCase):
     def test_excludes_stop_bar_and_right_boundary(self):
         t=trade(exit_time_ms=str(H))
-        bars=[bar(0,h=999),bar(H,h=95,l=85),bar(2*H,h=500)]
+        bars=[bar(0,h=999),bar(H,o=92,h=95,l=85,c=93),bar(2*H,h=500)]
         x=m.post_stop_window(t,bars,1,3*H)
         self.assertEqual(x['status'],'complete')
         self.assertFalse(x['entry_recovered_or_better'])
@@ -122,6 +122,70 @@ class PostStopTests(unittest.TestCase):
     def test_non_stop_exits_have_no_post_stop_label(self):
         x=m.post_stop_window(trade(exit_reason='target'),[],24,999*H)
         self.assertEqual(x['status'],'not_stop')
+
+    def test_endpoint_direction_is_disjoint_while_extremes_can_overlap(self):
+        t=trade(exit_time_ms=str(H))
+        x=m.post_stop_window(t,[bar(H,o=90,h=105,l=80,c=88)],1,3*H)
+        self.assertFalse(x['endpoint_favorable'])
+        self.assertTrue(x['endpoint_adverse'])
+        self.assertTrue(x['any_favorable_from_stop'])
+        self.assertTrue(x['any_adverse_from_stop'])
+        self.assertTrue(x['both_directions_order_unresolved'])
+
+    def test_short_post_stop_endpoint_and_target_are_mirrored(self):
+        t=trade(side='short',raw_exit='110',target='90',exit_time_ms=str(H))
+        x=m.post_stop_window(t,[bar(H,o=110,h=115,l=85,c=100)],1,3*H)
+        self.assertTrue(x['endpoint_favorable'])
+        self.assertTrue(x['original_target_reached'])
+
+    def test_every_user_fixed_window_uses_its_own_endpoint(self):
+        t=trade(exit_time_ms=str(H))
+        bars=[bar(k*H,o=90,h=100,l=80,c=91 if k<24 else 89) for k in range(1,49)]
+        for hours in (6,12,24,48):
+            with self.subTest(hours=hours):
+                x=m.post_stop_window(t,bars,hours,49*H)
+                self.assertEqual(x['status'],'complete')
+                self.assertEqual(x['endpoint_favorable'],hours<24)
+
+
+class AsOfContextTests(unittest.TestCase):
+    def test_4H_context_excludes_incomplete_4H_bar(self):
+        a=m.RegimeIndex([bar(0),bar(4*H,h=999)],'4h')
+        x=a.at(6*H)
+        self.assertEqual(x['reference_close_ms'],4*H)
+        self.assertEqual(x['direction'],'insufficient_prior_ma')
+
+    def test_future_prices_do_not_change_asof_MA_direction(self):
+        bars=[bar(i*H,o=100+i,h=102+i,l=99+i,c=101+i) for i in range(240)]
+        a=m.RegimeIndex(bars,'1h').at(225*H)
+        bars[225]=bar(225*H,h=99999,l=1)
+        b=m.RegimeIndex(bars,'1h').at(225*H)
+        self.assertEqual(a,b)
+        self.assertEqual(a['direction'],'bullish')
+
+    def test_stale_and_gapped_regimes_do_not_force_trend_label(self):
+        a=m.RegimeIndex([bar(0),bar(2*H)],'1h')
+        self.assertEqual(a.at(2*H)['direction'],'reference_data_gap_or_stale')
+        self.assertEqual(a.at(3*H)['direction'],'insufficient_prior_ma')
+
+    def test_BOS_confirmation_time_and_full_evidence_gate_future_event(self):
+        bars=[bar(i*H) for i in range(6)]
+        events=[dict(confirmed_at_close_time=2*H-1,direction='bullish',evidence_opens={0,H}),
+                dict(confirmed_at_close_time=4*H-1,direction='bearish',evidence_opens={H,3*H})]
+        a=m.StructureIndex(bars,'1h',events)
+        self.assertEqual(a.at(3*H)['direction'],'bullish')
+        self.assertEqual(a.at(4*H)['phase'],'latest_break_changed_direction')
+        self.assertEqual(a.at(4*H)['reference_confirm_ms'],4*H-1)
+
+    def test_BOS_evidence_outside_canonical_200bar_window_is_unavailable(self):
+        bars=[bar(i*H) for i in range(210)]
+        events=[dict(confirmed_at_close_time=209*H-1,direction='bullish',evidence_opens={0,208*H})]
+        self.assertEqual(m.StructureIndex(bars,'1h',events).at(210*H)['direction'],'no_confirmed_BOS_in_window')
+
+    def test_unknown_MTF_context_is_not_called_range_or_reversal(self):
+        self.assertEqual(m.mtf_alignment(['bullish','insufficient_prior_ma','bullish'],'long'),'unknown')
+        self.assertEqual(m.mtf_alignment(['bullish']*3,'long'),'all_aligned')
+        self.assertEqual(m.mtf_alignment(['bullish','bearish','bullish'],'long'),'mixed_or_opposed')
 
 
 class FilterAndSummaryTests(unittest.TestCase):
@@ -145,6 +209,13 @@ class FilterAndSummaryTests(unittest.TestCase):
         x=m.aggregate([])
         self.assertEqual(x['trades'],0)
         self.assertIsNone(x['win_rate_pct']);self.assertIsNone(x['mean_net_R'])
+
+    def test_stop_exit_rate_is_not_loss_rate(self):
+        a=dict(m.cost_decomposition(trade()),exit_reason='stop')
+        b=dict(m.cost_decomposition(trade(raw_exit='100.1',net_pnl_usdt='-.37001')),exit_reason='max_hold_72h')
+        x=m.aggregate([a,b])
+        self.assertEqual(x['stop_exit_rate_pct'],50)
+        self.assertEqual(x['actual_loss_rate_pct'],100)
 
     def test_diagnostic_bins_have_fixed_boundaries(self):
         self.assertEqual(m.holding_bucket(D(1)),'[0,1]')
