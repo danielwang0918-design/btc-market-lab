@@ -1,0 +1,97 @@
+name: P1-05 Stage2 historical price-stop-cash audit (NO EXECUTION)
+on:
+  push:
+    branches: ["research/p1-05-stage2-price-risk"]
+    paths:
+      - "p1_05_stage2_sizing.py"
+      - "test_p1_05_stage2_sizing.py"
+      - ".github/workflows/p1-05-stage2.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: p1-05-stage2-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: All repo unit tests including independent P0 price+R reconciliation
+        run: python -m unittest -v
+      - name: Download historical immutable P0 aggregates, eight priced trade outputs and full frozen OHLCV
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          base="$RUNNER_TEMP/p1052"
+          mkdir -p "$base/aggregate" "$base/source_prices" "$base/ohlcv"
+          gh run download 43820018876 -R "$GITHUB_REPOSITORY" -n multi-asset-fixed-baseline-43820018876 -D "$base/aggregate"
+          for sym in BTCUSDT ETHUSDT SOLUSDT ZECUSDT XRPUSDT BNBUSDT NEARUSDT DOGEUSDT; do
+            gh run download 43820018876 -R "$GITHUB_REPOSITORY" -n "multi-asset-baseline-43820018876-${sym}" -D "$base/source_prices"
+          done
+          gh run download 43820018876 -R "$GITHUB_REPOSITORY" -n multi-asset-input-43820018876 -D "$base/ohlcv"
+          python - <<'PY'
+          import os,zipfile
+          from pathlib import Path
+          base=Path(os.environ['RUNNER_TEMP'])/'p1052'
+          for name in ('aggregate','ohlcv'):
+              with zipfile.ZipFile(base/f'{name}.zip','w',zipfile.ZIP_DEFLATED,compresslevel=5) as z:
+                  for p in sorted((base/name).rglob('*')):
+                      if p.is_file():z.write(p,p.relative_to(base/name).as_posix())
+          assert len(list((base/'source_prices').glob('*_fixed_calendar_baseline.json')))==8
+          PY
+      - name: Reconstruct all 1340 original price/stop/target trades and compare two capital scenarios
+        run: |
+          python -u p1_05_stage2_sizing.py \
+            --baseline-zip "$RUNNER_TEMP/p1052/aggregate.zip" \
+            --sources "$RUNNER_TEMP/p1052/source_prices" \
+            --frozen-ohlcv "$RUNNER_TEMP/p1052/ohlcv.zip" \
+            --lock PROSPECTIVE_LOCK_V1.json \
+            --out-dir research/p1_05_stage2/results
+      - name: Fail closed if any trades, source data, paper risks or totals drift
+        run: |
+          python - <<'PY'
+          import json,csv
+          from pathlib import Path
+          p=Path('research/p1_05_stage2/results')
+          x=json.loads((p/'p1_05_stage2_manifest.json').read_text())
+          assert x['status']=='PAPER_PRICES_AND_CASH_RISK_VERIFIED_NOT_REAL_FILLS'
+          assert x['all_source_trades']==1340
+          a=x['results']['hypothetical_both_sides']
+          b=x['results']['spot_long_only_cash_capped']
+          assert (a['accepted_trades'],a['wins'])==(1000,210)
+          assert (b['accepted_trades'],b['wins'])==(578,121)
+          assert abs(a['final_equity_usdt']-4.2264772199156)<1e-7
+          assert abs(b['final_equity_usdt']-178.9742879167112)<1e-7
+          assert b['cash_capped_trades']==485
+          assert x['all_1340_unreachable_source_price']==1
+          assert x['all_1340_same_bar_unknown']==364
+          assert sum(1 for _ in csv.DictReader((p/'all_1340_source_price_audit.csv').open()))==1340
+          print('P1-05 Stage2 independent GitHub evidence ACCEPTED; all eight source SHA256 locked')
+          PY
+      - name: Publish descriptive summary
+        if: success()
+        run: |
+          python - <<'PY'
+          import json,os
+          from pathlib import Path
+          x=json.loads(Path('research/p1_05_stage2/results/p1_05_stage2_manifest.json').read_text())
+          a=x['results']['hypothetical_both_sides'];b=x['results']['spot_long_only_cash_capped']
+          msg=f"## P1-05 Stage2 (paper, never real executions)\n\n- P0 1340 priced trades: SHA-locked and fully reconciled\n- Both-sides theoretical: {a['accepted_trades']} trades, {a['final_equity_usdt']:.6f} USDT\n- Spot-long cash-capped: {b['accepted_trades']} trades, {b['final_equity_usdt']:.6f} USDT, cash cap hits {b['cash_capped_trades']}\n- Source gaps/unreachable {x['all_1340_unreachable_source_price']}; same-bar unknown {x['all_1340_same_bar_unknown']}\n\nTrade venue historical filters and actual intrabar fills NOT VERIFIED. No orders.\n"
+          print(msg)
+          Path(os.environ['GITHUB_STEP_SUMMARY']).open('a').write(msg)
+          PY
+      - name: Save all paper price, reason and cash sizing output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p1-05-stage2-original-prices-and-risk-${{ github.run_id }}
+          path: research/p1_05_stage2/results/*
+          if-no-files-found: warn
+          retention-days: 45
