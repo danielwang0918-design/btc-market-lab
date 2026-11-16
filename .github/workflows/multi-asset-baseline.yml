@@ -1,0 +1,177 @@
+name: Binance multi-asset fixed-rule baseline
+
+on:
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "multi_asset_baseline.py"
+      - "test_multi_asset_baseline.py"
+      - ".github/workflows/multi-asset-baseline.yml"
+  workflow_dispatch:
+    inputs:
+      symbols:
+        description: "Optional comma-separated Binance Spot USDT pairs; empty = current top-volume list"
+        required: false
+        type: string
+      top_n:
+        description: "Number of current top-volume USDT pairs, 1..50"
+        required: false
+        default: "10"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: multi-asset-baseline-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prepare:
+    name: Freeze universe and download 1D / 4H / 1H history
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    outputs:
+      symbols: ${{ steps.manifest.outputs.symbols }}
+    steps:
+      - name: Check out development branch
+        uses: actions/checkout@v4
+      - name: Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Run repository unit tests
+        run: python -m unittest -v
+      - name: Select and download public Binance Spot history
+        env:
+          REQUESTED_SYMBOLS: ${{ github.event.inputs.symbols || '' }}
+          TOP_N: ${{ github.event.inputs.top_n || '10' }}
+        run: |
+          if [ -n "$REQUESTED_SYMBOLS" ]; then
+            python -u multi_asset_history.py --symbols "$REQUESTED_SYMBOLS" --data-dir data/multi_asset
+          else
+            python -u multi_asset_history.py --top-volume "$TOP_N" --data-dir data/multi_asset
+          fi
+      - name: Record frozen universe for parallel symbol tests
+        id: manifest
+        run: |
+          python - <<'PY'
+          import json,os
+          from pathlib import Path
+          root=Path('data/multi_asset')
+          coverage=json.loads((root/'multi_asset_coverage.json').read_text(encoding='utf-8'))
+          if coverage.get('status') != 'complete' or coverage.get('failed_symbol_intervals'):
+              raise SystemExit('Incomplete market data: do not run strategy results')
+          universe=coverage['universe']
+          names=[e['symbol'] for e in universe['symbols']]
+          if not names or len(names)>50 or len(names)!=len(set(names)):
+              raise SystemExit('Invalid frozen universe')
+          with open(os.environ['GITHUB_OUTPUT'],'a',encoding='utf-8') as output:
+              output.write('symbols='+json.dumps(names,separators=(',',':'))+'\n')
+          print('Frozen UTC universe:',universe['selected_at_utc'],names)
+          PY
+      - name: Upload frozen historical data and selection provenance
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: multi-asset-input-${{ github.run_id }}
+          path: |
+            data/multi_asset/universe_selection.json
+            data/multi_asset/multi_asset_coverage.json
+            data/multi_asset/*_1d.csv
+            data/multi_asset/*_4h.csv
+            data/multi_asset/*_1h.csv
+          if-no-files-found: warn
+          retention-days: 14
+
+  per_asset:
+    name: Fixed formal backtest ${{ matrix.symbol }}
+    needs: prepare
+    if: ${{ needs.prepare.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        symbol: ${{ fromJSON(needs.prepare.outputs.symbols) }}
+    steps:
+      - name: Check out identical frozen development commit
+        uses: actions/checkout@v4
+      - name: Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Download the SAME frozen historical source for every symbol
+        uses: actions/download-artifact@v4
+        with:
+          name: multi-asset-input-${{ github.run_id }}
+          path: data/multi_asset
+      - name: Reuse formal closed-bar snapshots and stop-first simulation (no tuning)
+        run: >-
+          python -u multi_asset_baseline.py symbol "${{ matrix.symbol }}"
+          --data-dir data/multi_asset
+          --output-dir research/multi_asset/individual
+      - name: Upload per-symbol evidence, including excluded listings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: multi-asset-baseline-${{ github.run_id }}-${{ matrix.symbol }}
+          path: research/multi_asset/individual/*_fixed_calendar_baseline.json
+          if-no-files-found: warn
+          retention-days: 30
+
+  aggregate:
+    name: Aggregate fixed-calendar evidence without pretending independence
+    needs: [prepare, per_asset]
+    if: ${{ always() && needs.prepare.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Fetch frozen universe and historical evidence manifest
+        uses: actions/download-artifact@v4
+        with:
+          name: multi-asset-input-${{ github.run_id }}
+          path: data/multi_asset
+      - name: Fetch all per-symbol fixed baseline summaries
+        uses: actions/download-artifact@v4
+        with:
+          pattern: multi-asset-baseline-${{ github.run_id }}-*
+          path: research/multi_asset/individual
+          merge-multiple: true
+      - name: Build cross-symbol results and flag incomplete symbols
+        run: >-
+          python -u multi_asset_baseline.py aggregate
+          --coverage data/multi_asset/multi_asset_coverage.json
+          --results-dir research/multi_asset/individual
+          --output-dir research/multi_asset/summary
+      - name: Publish readable strategy scoreboard
+        if: always()
+        run: |
+          if [ -f research/multi_asset/summary/multi_asset_fixed_calendar_baseline.md ]; then
+            cat research/multi_asset/summary/multi_asset_fixed_calendar_baseline.md
+            if [ -n "$GITHUB_STEP_SUMMARY" ]; then
+              cat research/multi_asset/summary/multi_asset_fixed_calendar_baseline.md >> "$GITHUB_STEP_SUMMARY"
+            fi
+          else
+            echo 'Multi-asset scoreboard missing; check the preceding failure.'
+          fi
+      - name: Upload cross-symbol reports and input provenance
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: multi-asset-fixed-baseline-${{ github.run_id }}
+          path: |
+            research/multi_asset/summary/multi_asset_fixed_calendar_baseline.json
+            research/multi_asset/summary/multi_asset_fixed_calendar_baseline.md
+            research/multi_asset/summary/multi_asset_fixed_calendar_trades.csv
+            data/multi_asset/universe_selection.json
+            data/multi_asset/multi_asset_coverage.json
+          if-no-files-found: warn
+          retention-days: 30
