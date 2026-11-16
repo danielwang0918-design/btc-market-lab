@@ -1,4 +1,4 @@
-"""P1-07C: read-only opportunity/label/as-of audit; no estimator or training."""
+"""P1-07C: opportunity/as-of audit and one preregistered conditional-paper LR."""
 from __future__ import annotations
 import argparse,csv,hashlib,io,json,math
 from collections import Counter
@@ -123,7 +123,7 @@ def meta_features(row):
 def fit_meta(rows):
     """One fixed train-only fit. Future label quality never enters prediction admission."""
     pool=[r for r in rows if r['side']=='long' and r['source_status']=='eligible']
-    if any(int(r['feature_cutoff_ms'])>int(r['entry_time_ms']) or int(r['registration_ms'])>int(r['entry_time_ms']) for r in pool):
+    if any(r['audit_status']=='future_feature' or int(r['feature_cutoff_ms'])>int(r['entry_time_ms']) or int(r['registration_ms'])>int(r['entry_time_ms']) for r in pool):
         raise ValueError('future feature in prediction population')
     train=[r for r in pool if r['split']=='train' and r['audit_status']=='known_conditional_paper_label' and int(r['exit_time_ms'])<VALIDATION]
     positive=sum(r['label_net_positive'] for r in train);negative=len(train)-positive

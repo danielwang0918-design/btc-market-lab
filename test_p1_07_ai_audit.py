@@ -128,6 +128,11 @@ class MetaTests(unittest.TestCase):
         row=m.audit_rows([plan(key='future',feature_cutoff_ms='1602723600001')],[outcome(key='future')])[0]
         with self.assertRaisesRegex(ValueError,'future feature'):
             m.fit_meta(training_rows()+[row])
+    def test_other_audited_future_evidence_cannot_bypass_prediction_guard(self):
+        row=m.audit_rows([plan(key='future',signal_time_ms='1602720000001')],[outcome(key='future')])[0]
+        self.assertEqual(row['audit_status'],'future_feature')
+        with self.assertRaisesRegex(ValueError,'future feature'):
+            m.fit_meta(training_rows()+[row])
 
 
 if __name__=='__main__':unittest.main()
