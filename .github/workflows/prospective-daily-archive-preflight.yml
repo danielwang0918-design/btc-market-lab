@@ -40,6 +40,7 @@ jobs:
       - name: Bootstrap and restore all 24 exact frozen K-line files
         run: |
           set -euo pipefail
+          mkdir -p research
           python prospective_daily_archive.py bootstrap \
             --lock PROSPECTIVE_LOCK_V1.json --repo-dir . \
             --seed-source /tmp/p0-08-seed \
