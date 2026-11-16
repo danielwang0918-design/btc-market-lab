@@ -67,7 +67,8 @@ def summarize(labels):
         definitely_cost_covered=sum(r['net_quote_potential_R_model_lower']>0 for r in valid),
         favorable_but_cost_insufficient=sum(r['mfe_R0_lower']>0 and r['net_quote_potential_R_model_upper']<=0 for r in valid))
     for key in ('mfe_R0_lower','mfe_R0_upper','mae_R0_lower','mae_R0_upper','mfe_R_model_lower','mfe_R_model_upper',
-                'giveback_R0_lower','giveback_R0_upper','close_efficiency_proxy','observed_closes_near_entry_fraction','observed_hours'):
+                'giveback_R0_lower','giveback_R0_upper','close_efficiency_proxy','observed_closes_near_entry_fraction','observed_hours',
+                'cost_over_mfe_lower','cost_over_mfe_upper'):
         values=[float(r[key]) for r in valid if r.get(key) is not None]
         result['mean_'+key]=sum(values)/len(values) if values else None
         result['median_'+key]=stats.percentile(values,.5)
@@ -117,7 +118,8 @@ def frozen_and_events(z):
 
 def catalog():
     return [dict(feature=k,role='known_at_or_before_entry',availability='source closed frame reference<=decision; geometry at original breach close',
-                 note='No exit/PnL/path labels') for k in (*CONTEXT_FIELDS,'body_share','upper_wick_share','lower_wick_share','compression_ratio','ATR_pre','ER_pre','break_rvol','close_extension_ATR','breakclose_location_20D')]+[
+                 note='No exit/PnL/path labels') for k in (*CONTEXT_FIELDS,'body_share','upper_wick_share','lower_wick_share','compression_ratio','ATR_pre','ER_pre','break_rvol','close_extension_ATR','breakclose_location_20D',
+                    'prebreak_ATR_pct','flat_cost5_over_ATR_pre','flat_cost15_over_ATR_pre')]+[
         dict(feature='entry_bar_final_body_and_RVOL',role='deferred_not_populated',availability='entry_time+1H',note='Cannot authorize that same open'),
         dict(feature='future_pivot',role='deferred_not_populated',availability='right confirmation candles closed',note='No hindsight pivot'),
         dict(feature='MFE_MAE_arrivals_giveback_exit_PnL',role='posthoc_label_only',availability='after relevant future window or original exit',note='Separate files; never feature')]
@@ -227,9 +229,24 @@ def _run(source_zip,out):
                 timeout.append(dict(path_id=pid,model=row['model'],period=row['period'],scenario=row['scenario'],symbol=row['symbol'],event_id=row['event_id'],
                     archived_net_R=row['r_multiple'],archived_net_pnl_USDT=row['net_pnl_usdt'],path_class=paths.timeout_class(label),**label))
         files.write_csv(out/'t20_cont_timeout_diagnosis.csv',timeout)
+        timeout_ci=[]
+        for account in accounts:
+            if account['policy']!='T20_CONT':continue
+            for universe,metric in itertools.product(('all_eight','BTC','other_seven'),('mfe_R0_lower','giveback_R0_lower','endpoint_gross_R0')):
+                local=[r for r in timeout if all(r[k]==account[k] for k in ('model','period','scenario')) and r['complete'] and (universe=='all_eight' or (r['symbol']=='BTCUSDT' if universe=='BTC' else r['symbol']!='BTCUSDT'))]
+                start,end=calendars.PERIODS[account['period']]
+                ci=stats.block_difference([dict(r,entry_time_ms=seeds[r['path_id']]['entry_time_ms'],net_R=r[metric]) for r in local],[],start,end)
+                timeout_ci.append(dict(**{k:account[k] for k in ('model','period','scenario')},universe=universe,metric=metric,n=len(local),
+                    estimate=ci['group_a_mean_R'],low95=ci['group_a_low95'],high95=ci['group_a_high95'],nonempty_blocks=ci['group_a_nonempty_blocks'],
+                    calendar_blocks=ci['calendar_blocks'],replications=1000,seed=808,label_only_not_net_profit=True))
+        files.write_csv(out/'timeout_block_uncertainty.csv',timeout_ci)
         summaries=Table(out/'path_summary.csv');exits=Table(out/'exit_path_summary.csv');timeout_summary=Table(out/'timeout_horizon_summary.csv')
         universes=('all_eight','BTC','other_seven',*lock['symbols'])
-        def member(pid,universe):return universe=='all_eight' or seeds[pid]['symbol']=='BTCUSDT' if universe in ('all_eight','BTC') else seeds[pid]['symbol']!='BTCUSDT' if universe=='other_seven' else seeds[pid]['symbol']==universe
+        def member(pid,universe):
+            if universe=='all_eight':return True
+            if universe=='BTC':return seeds[pid]['symbol']=='BTCUSDT'
+            if universe=='other_seven':return seeds[pid]['symbol']!='BTCUSDT'
+            return seeds[pid]['symbol']==universe
         for profile,ids in sorted(profiles.items()):
             for universe in universes:
                 local=sorted(pid for pid in ids if member(pid,universe))
@@ -270,6 +287,8 @@ def legacy_index(bars):
 
 def associations(out,isolated,seeds,cache,features):
     rows=[]
+    numeric=('compression_ratio','body_share','upper_wick_share','lower_wick_share','close_extension_ATR','extreme_extension_ATR',
+        'ER_pre','break_rvol','preclose_location_20D','breakclose_location_20D','prebreak_ATR_pct','flat_cost5_over_ATR_pre','flat_cost15_over_ATR_pre')
     for source in isolated:
         if source['scenario']!='source_stop_first':continue
         pid=path_key(source);label=cache[pid]['horizons'][('tape',24)]
@@ -283,11 +302,17 @@ def associations(out,isolated,seeds,cache,features):
             mfe_ATRpre=label['mfe_price_lower']/atr if label['complete'] and atr is not None and atr>0 else None,
             mfe_price_pct=100*label['mfe_price_lower']/price if label['complete'] else None,
             **{key:f.get(key,'unknown') for key in ASSOCIATION_BINS if key!='cost_share_bin'},
+            **{key:f.get(key) for key in numeric},known_entry_cost_share=cost,
             cost_share_bin='<=.25' if cost<=D('.25') else '>.25'))
     files.write_csv(out/'association_event_table.csv',rows)
-    grouped=[]
+    grouped=[];correlations=[]
     for policy,side,(period,(start,end)),universe in itertools.product(('A','S_ATR1','T20_FAIL','T20_CONT'),('long','short'),calendars.PERIODS.items(),('all_eight','BTC','other_seven')):
         local=[r for r in rows if r['policy']==policy and r['side']==side and start<=r['entry_time_ms']<end and (universe=='all_eight' or (r['symbol']=='BTCUSDT' if universe=='BTC' else r['symbol']!='BTCUSDT'))]
+        for predictor,metric in itertools.product((*numeric,'known_entry_cost_share'),('mfe_R0','mae_R0','mfe_ATRpre')):
+            pairs=[(float(r[predictor]),float(r[metric])) for r in local if r[predictor] is not None and r[metric] is not None]
+            correlations.append(dict(policy=policy,side=side,period=period,universe=universe,predictor=predictor,posthoc_metric=metric,
+                n_pairs=len(pairs),pearson_r=correlation([a for a,b in pairs],[b for a,b in pairs]),small_sample=len(pairs)<30,
+                role='descriptive_only_no_iid_pvalue_or_feature_selection'))
         for field,categories in ASSOCIATION_BINS.items():
             for category in categories:
                 subset=[r for r in local if r[field]==category];valid=[r for r in subset if r['label_complete']]
@@ -299,6 +324,7 @@ def associations(out,isolated,seeds,cache,features):
                     n_mfe_ATRpre=sum(r['mfe_ATRpre'] is not None for r in valid),
                     mean_mfe_R0=avg('mfe_R0'),mean_mae_R0=avg('mae_R0'),mean_mfe_ATRpre=avg('mfe_ATRpre'),mean_mfe_price_pct=avg('mfe_price_pct'),small_sample=len(valid)<30))
     files.write_csv(out/'feature_path_associations.csv',grouped)
+    files.write_csv(out/'continuous_feature_correlations.csv',correlations)
     contrasts=[]
     for hid,field,a,b in [('H_COMPRESSION','compression_bin','<1','>=1'),('H_BODY','body_bin','>=.5','<.5')]:
         for (period,(start,end)),universe,metric in itertools.product(calendars.PERIODS.items(),('all_eight','BTC','other_seven'),('mfe_R0','mfe_ATRpre','mae_R0')):

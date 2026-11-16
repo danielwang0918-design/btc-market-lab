@@ -14,7 +14,7 @@
 2. **6/12/24/48/72h持倉前綴**：在原exit截斷，標示early_exit，不是足量存活至h小時。
 3. **固定h小時行情帶**：不因原exit截斷，因此可能包含止損後／出場後價格；一律明標counterfactual及post-exit旗標，不進可實現盈虧。不能跨2023／2025／凍結截止界線。
 
-方向sign=+1多、−1空，`MFE=max(0,sign*(price−entry))`、`MAE=max(0,−sign*(price−entry))`。已知全程持有棒的H/L可用；限價入場同棒及棒內出場棒只給寬鬆OHLC envelope，上下界可能不相等，不能當真實可成交極值。下界由已知entry／exit、可確認持有時段的報價給出。缺棒／零量時真上界未知，僅保留已觀察下界及缺口原因。stop_gap與資料缺口的開盤退出按原紀錄時點，不誤取下一小時全棒。
+方向sign=+1多、−1空，`MFE=max(0,sign*(price−entry))`、`MAE=max(0,−sign*(price−entry))`。已知全程持有棒的H/L可用；限價入場同棒及棒內出場棒只給寬鬆OHLC envelope，上下界可能不相等，不能當真實可成交極值。下界是**以原模型成交假設為條件**，由模型entry／exit價及可確認持有時段的報價給出，不是實盤成交證明。缺棒／零量時真上界未知，僅保留已觀察下界及缺口原因。stop_gap與資料缺口的開盤退出按原紀錄時點，不誤取下一小時全棒。
 
 `giveback=MFE_gross_R−endpoint_gross_R`，成本另列；MFE−netR含成本，不可全部叫價格回吐。MFE處按原成本公式算出的net_quote_potential只是事後上限算式，沒有假設能在該高低點成交。實現淨R只讀原檔，不二次扣費。
 
@@ -33,6 +33,8 @@
 壓縮比=`ATR14_pre / mean(嚴格更早20個ATR14)`，用P1-08A精確14TR和，分母排除當期preATR，<1為壓縮、≥1非壓縮，缺史／缺棒未知。實體比abs(C−O)/(H−L)，上／下影線分別(H−max(O,C))/(H−L)、(min(O,C)−L)/(H−L)，0 range未知。突破close／extreme對原20D level的有方向距離除以preATR；位置為(C−20Dlow)/(20Dhigh−20Dlow)，不截斷範圍外值。
 
 重用P1-08A的三週期趨勢、ER、ATR、RVOL及正常風險成本占比。非20D訊號家族的「突破棒」未有等價欄位，本輪不以最近棒假造，明列不可用。拒絕事件保留registration快照，沒有假想entry。進場棒最終實體／RVOL須t+1H才可用；未確認pivot亦不能提前用，列於deferred catalog而不填特徵值。特徵表與path／PnL標籤分檔，來源狀態、exit、PnL、MFE、MAE不入feature whitelist。
+
+成本的可得時間另分清楚：原正常停損成本占比使用實際entry報價與已知SL，只有eligible-entry時點可知，不冒稱在最初登記前已知。另列prebreak ATR/C_pre與`−net_unit(C_pre,C_pre,slip)/ATR_pre`（5/15bps），只用突破前已閉close，作波動相對摩擦代理；不是新增1ATR止損或進場條件。連續特徵相關全數輸出，不依相關值選新候選；不報iid p值。到期MFE／回吐另以同28日區塊估計均值區間，仍是事後label而非收益區間。
 
 ## 探索關聯與最多兩個假說
 

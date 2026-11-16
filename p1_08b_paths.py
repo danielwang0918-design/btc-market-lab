@@ -149,6 +149,7 @@ class BreakFeatures:
         out=dict(feature_status='not_defined_for_signal_family',break_open_ms=None,break_available_ms=None,prebreak_available_ms=None,
             body_share=None,upper_wick_share=None,lower_wick_share=None,body_bin='unknown',ATR_pre=None,
             compression_ratio=None,compression_bin='unknown',ER_pre=None,ER_pre_bin='unknown',break_rvol=None,break_rvol_bin='unknown',
+            prebreak_ATR_pct=None,flat_cost5_over_ATR_pre=None,flat_cost15_over_ATR_pre=None,
             close_extension_ATR=None,extreme_extension_ATR=None,extension_bin='unknown',reference_high=None,reference_low=None,
             reference_closed_ms=None,preclose_location_20D=None,breakclose_location_20D=None,range_position_bin='unknown')
         if row['policy'] not in daily.POLICIES:return out
@@ -178,6 +179,10 @@ class BreakFeatures:
             out.update(ATR_pre=atr,ER_pre=f['ER20'],ER_pre_bin=f['ER_state'])
             if atr is not None and atr>0:
                 ext=(b.c-level)*sign/atr
+                preclose=self.hour.bars[p].c
+                out.update(prebreak_ATR_pct=100*atr/preclose,
+                    flat_cost5_over_ATR_pre=-money.net_per_unit(preclose,preclose,row['side'],D(5))/atr,
+                    flat_cost15_over_ATR_pre=-money.net_per_unit(preclose,preclose,row['side'],D(15))/atr)
                 out.update(close_extension_ATR=ext,extreme_extension_ATR=((b.h if sign==1 else b.l)-level)*sign/atr,
                     extension_bin='<.5' if ext<D('.5') else '.5-1' if ext<1 else '>=1')
             if p-20>=st and total is not None:
