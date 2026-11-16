@@ -1,7 +1,7 @@
 name: P1-05 Stage2 historical price-stop-cash audit (NO EXECUTION)
 on:
   push:
-    branches: ["research/p1-05-stage2-audit"]
+    branches: ["research/p1-05-stage2-price-risk"]
     paths:
       - "p1_05_stage2_sizing.py"
       - "test_p1_05_stage2_sizing.py"
