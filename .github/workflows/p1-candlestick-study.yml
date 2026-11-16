@@ -1,0 +1,81 @@
+name: P1-01 closed-candle patterns (frozen descriptive research)
+
+on:
+  push:
+    branches: ["codex/p1-01-candlesticks"]
+    paths:
+      - "p1_candlestick_research.py"
+      - "test_p1_candlestick_research.py"
+      - "P1_01_CANDLESTICK_RESEARCH.md"
+      - "CODEX_P1_01_TASK.md"
+      - ".github/workflows/p1-candlestick-study.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: p1-01-closed-patterns-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  frozen-study:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout research-only branch
+        uses: actions/checkout@v4
+      - name: Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Verify all offline unit tests
+        run: python -m unittest -v
+      - name: Download unchanged frozen 1D/4H/1H Binance research evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/p1-01-history
+          gh run download 43820018876 -R "$GITHUB_REPOSITORY" \
+            -n multi-asset-input-43820018876 -D /tmp/p1-01-history
+          python - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile,ZIP_DEFLATED
+          root=Path('/tmp/p1-01-history')
+          with ZipFile('/tmp/p1-01-frozen-history.zip','w',compression=ZIP_DEFLATED) as z:
+              for f in sorted(root.glob('*')):
+                  if f.is_file():z.write(f,arcname=f.name)
+          PY
+      - name: Run frozen eight-asset K-line geometry research, not real trades
+        run: >-
+          python -u p1_candlestick_research.py
+          --frozen-archive /tmp/p1-01-frozen-history.zip
+          --lock PROSPECTIVE_LOCK_V1.json
+          --out-dir research/p1_01
+      - name: Post study facts and precautions
+        if: always()
+        run: |
+          if [ -f research/p1_01/p1_01_manifest.json ]; then
+            python - <<'PY'
+          import json,os
+          r=json.load(open('research/p1_01/p1_01_manifest.json'))
+          print('Frozen files validated:',len(r['input_sha256']))
+          print('Events:',r['unique_pattern_events'])
+          print('WARNING: old Test already opened; outcomes are exploratory paper research only')
+          if os.getenv('GITHUB_STEP_SUMMARY'):
+              with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as f:
+                  f.write('# P1-01 frozen candlestick study\n\n')
+                  f.write(f"Validated files: {len(r['input_sha256'])}, observed pattern events: {r['unique_pattern_events']}\n\n")
+                  f.write('**Not an independent Test, not a live trading win rate.**\n')
+          PY
+          fi
+      - name: Upload all combinations (no cherry-picking)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p1-01-closed-candlestick-study-${{ github.run_id }}
+          path: research/p1_01/*
+          retention-days: 30
+          if-no-files-found: warn
