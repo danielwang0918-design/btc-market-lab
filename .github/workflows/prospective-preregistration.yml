@@ -1,0 +1,85 @@
+name: P0 prospective fixed-rule protocol preregistration (1H+ only)
+
+on:
+  push:
+    branches: ["codex/**"]
+    paths:
+      - "prospective_validation.py"
+      - "prospective_candle_append.py"
+      - "PROSPECTIVE_LOCK_V1.json"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: prospective-preregistration-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  freeze:
+    name: Validate code, pre-start lock, data SHA and genesis record
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - name: Run all repository tests including preregistration gates
+        run: python -m unittest -v
+      - name: Recover preselected BTC/altcoin frozen 1H/4H/1D source and baseline
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: '43820018876'
+        run: |
+          set -euo pipefail
+          mkdir -p research/prospective_07/baseline data/prospective_07
+          gh run download "$RUN_ID" -R "$GITHUB_REPOSITORY" -n "multi-asset-input-$RUN_ID" -D data/prospective_07
+          gh run download "$RUN_ID" -R "$GITHUB_REPOSITORY" -n "multi-asset-fixed-baseline-$RUN_ID" -D research/prospective_07/baseline
+      - name: Save exact UTC pre-start evidence and reject backdated preregistration
+        run: |
+          set -euo pipefail
+          date -u '+GitHub actual UTC: %Y-%m-%dT%H:%M:%SZ'
+          python -u prospective_validation.py preflight \
+            --lock PROSPECTIVE_LOCK_V1.json \
+            --repo-dir . \
+            --data-dir data/prospective_07 \
+            --baseline-aggregate research/prospective_07/baseline/research/multi_asset/summary/multi_asset_fixed_calendar_baseline.json \
+            --out research/prospective_07/prospective_genesis.json
+      - name: Publish frozen preregistration certificate
+        if: always()
+        run: |
+          if [ -f research/prospective_07/prospective_genesis.json ]; then
+            python - <<'PY'
+          import json,os
+          from pathlib import Path
+          p=Path('research/prospective_07/prospective_genesis.json')
+          doc=json.loads(p.read_text())
+          text=['# P0-ORDER-STATE-07 — prospective preregistration',
+                '',f"- Lock SHA256: `{doc['lock_sha256']}`",
+                f"- Genesis SHA256: `{doc['record_sha256']}`",
+                f"- Status: `{doc['result']['status']}`",
+                '- First eligible future candle: **2026-11-17 00:00 UTC**',
+                '- Markets: 8 fixed USDT spot pairs',
+                '- Only 1D / 4H / 1H fully closed decisions',
+                '- No live orders, no 2025 Test retuning or forward claims yet.']
+          if os.getenv('GITHUB_STEP_SUMMARY'):
+              with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as f:
+                  f.write('\n'.join(text)+'\n')
+          print('\n'.join(text))
+          PY
+          else
+            echo 'No genesis. P0 preregistration FAILS CLOSED.'
+          fi
+      - name: Store preregistration artifact, not trading orders
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: prospective-preregistered-${{ github.run_id }}
+          path: |
+            PROSPECTIVE_LOCK_V1.json
+            research/prospective_07/prospective_genesis.json
+          if-no-files-found: warn
+          retention-days: 90
