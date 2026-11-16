@@ -51,6 +51,14 @@ class TimingTests(unittest.TestCase):
 
 
 class StateTests(unittest.TestCase):
+    def test_periodic_equal_true_ranges_are_unchanged_not_float_noise(self):
+        # Two windows have exactly14 TRs of0.2, at different price scales.
+        # The intervening jump has already left the last14 bars.
+        bars=[bar(i,close=100 if i<100 else 300,
+            high=D(100 if i<100 else 300)+D('.1'),
+            low=D(100 if i<100 else 300)-D('.1')) for i in range(120)]
+        self.assertEqual(m.FrameState(bars,'1h').at(120*m.H)['volatility_change'],'unchanged')
+
     def test_flat_price_is_range_proxy_without_division_by_zero(self):
         r=m.FrameState([bar(i) for i in range(240)],'1h').at(240*m.H)
         self.assertEqual(r['ER20'],0)
