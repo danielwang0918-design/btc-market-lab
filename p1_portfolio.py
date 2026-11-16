@@ -138,7 +138,7 @@ def run_account(policy,model,start,end,assets):
 def _run_account(policy,model,start,end,assets):
     cash=D(1000);position=None;pending={};consumed=set();trades=[];curve=[];logs=[];counts=Counter();peak=D(1000);maxdd=D(0);in_market=0
     slip=D(15) if model.endswith('slip15') else D(5);priority='target_first' if model.endswith('target_first') else 'stop_first'
-    phase_start=start;last_marks={};max_positions=0;unpriced_hours=0
+    phase_start=start;last_marks={};max_positions=0;unpriced_hours=0;raw_seen=set()
     def log(t,sym,signal,event,**extra):
         logs.append(dict(time_ms=t,time_utc=utc(t),symbol=sym,setup_id=signal.get('setup_id',''),event=event,
             direction=signal.get('side',''),entry_low=signal.get('zone_low',''),entry_high=signal.get('zone_high',''),
@@ -246,6 +246,11 @@ def _run_account(policy,model,start,end,assets):
             i=a.by_time.get(t)
             if i is None:continue
             snap=a.snaps[i];p=pending.get(sym);candidate=snap.get('candidate')
+            if snap['integrity_ok'] and candidate and (sym,candidate['setup_id']) not in raw_seen:
+                raw_seen.add((sym,candidate['setup_id']))
+                log(t+H,sym,candidate,'raw_unfiltered_candidate')
+                if p and candidate['setup_id']!=p['setup_id']:
+                    log(t+H,sym,candidate,'not_queued_existing_pending')
             if p and not p.get('market_at') and (not snap['integrity_ok'] or not policy.startswith('E') and (not candidate or candidate['setup_id']!=p['setup_id'])):
                 log(t+H,sym,p,'pending_closed_state_cancel');pending.pop(sym)
             if sym not in pending and snap['integrity_ok'] and candidate and t+H not in CUTS and t+H<end:
@@ -255,7 +260,7 @@ def _run_account(policy,model,start,end,assets):
                     log(t+H,sym,candidate,'canonical_signal_registered')
         if t+H in CUTS or t+H==end:
             for sym,p in pending.items():log(t+H,sym,p,'calendar_pending_cancel')
-            pending.clear();consumed.clear();phase_start=t+H
+            pending.clear();consumed.clear();raw_seen.clear();phase_start=t+H
         mark=cash
         if position:
             p=position;raw=last_marks.get(p['symbol'],p['raw_entry']);x=fill(raw,p['side'],False,slip)
