@@ -1,0 +1,83 @@
+name: P1-QUALITY-01 pre-pattern evidence and overlapping-paper-exposure audit
+
+on:
+  push:
+    branches: ["research/p1-quality-01"]
+    paths:
+      - "p1_research_quality_gate.py"
+      - "test_p1_research_quality_gate.py"
+      - "P1_QUALITY_01.md"
+      - ".github/workflows/p1-quality-evidence-audit.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: p1-quality-01-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: All repository Python tests including new evidence integrity guards
+        run: python -m unittest -v
+      - name: Fetch only previously verified and frozen historical evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p research/p1_quality_01/upstream/p1 research/p1_quality_01/upstream/integrated
+          gh run download 43857787070 -R "$GITHUB_REPOSITORY" -n p1-01-review-evidence-43857787070 -D research/p1_quality_01/upstream/p1
+          gh run download 43862040301 -R "$GITHUB_REPOSITORY" -n p1-reviewed-propagation-43862040301 -D research/p1_quality_01/upstream/integrated
+          python - <<'PY'
+          from zipfile import ZipFile, ZIP_DEFLATED
+          from pathlib import Path
+          root=Path('research/p1_quality_01/upstream')
+          for sub,out in [('p1','p1-review.zip'),('integrated','integrated.zip')]:
+              src=root/sub
+              entries=sorted(p for p in src.rglob('*') if p.is_file())
+              assert len(entries)>=3,(sub,len(entries))
+              with ZipFile(root/out,'w',compression=ZIP_DEFLATED) as z:
+                  for p in entries:z.write(p,p.relative_to(src).as_posix())
+          PY
+      - name: Reconcile reviewed pattern events and audited market classifications
+        run: >-
+          python -u p1_research_quality_gate.py
+          --p1-reviewed research/p1_quality_01/upstream/p1-review.zip
+          --p1-integrated research/p1_quality_01/upstream/integrated.zip
+          --out-dir research/p1_quality_01/results
+      - name: Fail unless complete 106433 event and 311873 paper window evidence reproduced
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          d=Path('research/p1_quality_01/results')
+          x=json.loads((d/'p1_quality_manifest.json').read_text(encoding='utf-8'))
+          assert x['status']=='strict_evidence_join_and_exposure_audit_passed'
+          assert (x['unique_events'],x['observation_rows'],x['evaluated'],x['right_censored'],x['unavailable_fixed_time_fill'])==(106433,319299,311873,7402,24)
+          assert (x['matched_zone_classifications'],x['matched_ma_atr_classifications'])==(106433,106433)
+          assert x['same_symbol_frame_horizon_any_overlap']==301787
+          assert x['positive_edge_claim'] is False and x['real_trades']==0 and x['strategy_changed'] is False
+          print('P1-QUALITY-01 frozen evidence gate PASSED')
+          PY
+      - name: Publish full descriptive report and overlap caveats
+        if: success()
+        run: |
+          cat research/p1_quality_01/results/P1_QUALITY_01_REPORT_ZH.md
+          cat research/p1_quality_01/results/P1_QUALITY_01_REPORT_ZH.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload all quality and overlap evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p1-quality-01-verified-${{ github.run_id }}
+          path: research/p1_quality_01/results/*
+          if-no-files-found: warn
+          retention-days: 45
