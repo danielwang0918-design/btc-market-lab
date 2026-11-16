@@ -1,8 +1,8 @@
 """Closed-candle state annotations and archived-result diagnostics, never signals."""
 from __future__ import annotations
 import bisect, math, random
-from collections import defaultdict
-from decimal import Decimal as D
+from collections import defaultdict,deque
+from decimal import Decimal as D,localcontext
 import p1_candlestick_research as core
 import p1_market_regime as regime
 import p1_volume_rvol as volume
@@ -32,6 +32,19 @@ class FrameState:
         self.reg=regime.RegimeSource([regime.Candle(b.open_ms,float(b.o),float(b.h),float(b.l),float(b.c)) for b in bars],frame)
         self.index=old_diag.RegimeIndex(bars,frame,self.reg)
         self.turnovers=[b.c*b.v for b in bars]
+        # Same14 true ranges as P1-03. Only the new change diagnostic uses
+        # exact decimal sums; the /14 factors cancel. Comparing sums avoids
+        # falsely labeling equal ranges as expansion from legacy float noise.
+        self.exact_tr_sums=[None]*len(bars)
+        with localcontext() as ctx:
+            ctx.prec=max(ctx.prec,50);window=deque();total=D(0)
+            for i,b in enumerate(bars):
+                st=self.starts[i]
+                if i==st:window.clear();total=D(0)
+                tr=max(b.h-b.l,abs(b.h-bars[i-1].c),abs(b.l-bars[i-1].c)) if i>st else b.h-b.l
+                window.append(tr);total+=tr
+                if len(window)>14:total-=window.popleft()
+                if i-st>=14:self.exact_tr_sums[i]=total
         self.zeros=[0]
         for b in bars:self.zeros.append(self.zeros[-1]+int(b.v==0))
 
@@ -53,10 +66,10 @@ class FrameState:
             changes=sum(abs(self.bars[j].c-self.bars[j-1].c) for j in range(p-19,p+1))
             er=abs(b.c-self.bars[p-20].c)/changes if changes else D(0)
             out.update(ER20=float(er),ER_state='range_proxy' if er<=D('.2') else 'efficient_move_proxy' if er>=D('.4') else 'mixed')
-            old=self.reg.atr[p-20];cur=self.reg.atr[p]
+            old=self.exact_tr_sums[p-20];cur=self.exact_tr_sums[p]
             if old is not None and old>0 and cur is not None:
                 ratio=cur/old
-                out.update(ATR_change_ratio=ratio,volatility_change='expansion' if ratio>1 else 'contraction' if ratio<1 else 'unchanged')
+                out.update(ATR_change_ratio=float(ratio),volatility_change='expansion' if cur>old else 'contraction' if cur<old else 'unchanged')
             hi=max(x.h for x in self.bars[p-20:p]);lo=min(x.l for x in self.bars[p-20:p])
             up=b.h>hi;down=b.l<lo
             state=('both_sides_unknown' if up and down else

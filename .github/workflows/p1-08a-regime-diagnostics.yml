@@ -87,7 +87,7 @@ jobs:
           PY
       - name: Publish Traditional Chinese methods, diagnosis and limits
         run: |
-          cp AGENTS.md P1_08A_*.md P1_08A_PROTOCOL.json research/p1_08a_evidence/
+          cp AGENTS.md P1_08A_*.md P1_08A_*.json research/p1_08a_evidence/
           cat research/p1_08a_evidence/results/P1_08A_RESULT_ZH.md >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         if: always()

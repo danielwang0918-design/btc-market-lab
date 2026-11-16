@@ -1,0 +1,171 @@
+{
+  "reason": "Equal mathematical ATR windows must not be classified by inherited floating-point drift; same14TR/20lag formula, no epsilon or threshold change",
+  "red_test_commit": "83a1873",
+  "source_zip_sha256": "eed65cbfd3ad60c01ef951d2bea5a1414e269e0ef756ae527aa7a27d0402171f",
+  "unique_cutoff_frame_class_changes": [
+    {
+      "symbol": "BNBUSDT",
+      "decision_time_ms": "1647788400000",
+      "frame": "1h",
+      "before": "contraction",
+      "after": "unchanged",
+      "before_ratio": "0.9999999999999971",
+      "after_ratio": "1.0"
+    },
+    {
+      "symbol": "NEARUSDT",
+      "decision_time_ms": "1690243200000",
+      "frame": "1h",
+      "before": "contraction",
+      "after": "unchanged",
+      "before_ratio": "0.9999999999999988",
+      "after_ratio": "1.0"
+    },
+    {
+      "symbol": "NEARUSDT",
+      "decision_time_ms": "1691190000000",
+      "frame": "1h",
+      "before": "expansion",
+      "after": "unchanged",
+      "before_ratio": "1.000000000000005",
+      "after_ratio": "1.0"
+    },
+    {
+      "symbol": "NEARUSDT",
+      "decision_time_ms": "1696158000000",
+      "frame": "1h",
+      "before": "expansion",
+      "after": "unchanged",
+      "before_ratio": "1.0000000000000087",
+      "after_ratio": "1.0"
+    },
+    {
+      "symbol": "NEARUSDT",
+      "decision_time_ms": "1703149200000",
+      "frame": "1h",
+      "before": "expansion",
+      "after": "unchanged",
+      "before_ratio": "1.0000000000000013",
+      "after_ratio": "1.0"
+    },
+    {
+      "symbol": "NEARUSDT",
+      "decision_time_ms": "1750885200000",
+      "frame": "1h",
+      "before": "contraction",
+      "after": "unchanged",
+      "before_ratio": "0.9999999999999989",
+      "after_ratio": "1.0"
+    },
+    {
+      "symbol": "NEARUSDT",
+      "decision_time_ms": "1769709600000",
+      "frame": "1h",
+      "before": "contraction",
+      "after": "unchanged",
+      "before_ratio": "0.9999999999999976",
+      "after_ratio": "1.0"
+    },
+    {
+      "symbol": "SOLUSDT",
+      "decision_time_ms": "1671195600000",
+      "frame": "1h",
+      "before": "contraction",
+      "after": "unchanged",
+      "before_ratio": "0.9999999999999978",
+      "after_ratio": "1.0"
+    },
+    {
+      "symbol": "SOLUSDT",
+      "decision_time_ms": "1694426400000",
+      "frame": "4h",
+      "before": "expansion",
+      "after": "unchanged",
+      "before_ratio": "1.0000000000000013",
+      "after_ratio": "1.0"
+    },
+    {
+      "symbol": "SOLUSDT",
+      "decision_time_ms": "1787144400000",
+      "frame": "1h",
+      "before": "expansion",
+      "after": "unchanged",
+      "before_ratio": "1.0000000000000049",
+      "after_ratio": "1.0"
+    },
+    {
+      "symbol": "XRPUSDT",
+      "decision_time_ms": "1654999200000",
+      "frame": "4h",
+      "before": "expansion",
+      "after": "unchanged",
+      "before_ratio": "1.0000000000000004",
+      "after_ratio": "1.0"
+    },
+    {
+      "symbol": "XRPUSDT",
+      "decision_time_ms": "1699520400000",
+      "frame": "1h",
+      "before": "expansion",
+      "after": "unchanged",
+      "before_ratio": "1.000000000000001",
+      "after_ratio": "1.0"
+    },
+    {
+      "symbol": "ZECUSDT",
+      "decision_time_ms": "1637823600000",
+      "frame": "1h",
+      "before": "contraction",
+      "after": "unchanged",
+      "before_ratio": "0.9999999999999993",
+      "after_ratio": "1.0"
+    },
+    {
+      "symbol": "ZECUSDT",
+      "decision_time_ms": "1660672800000",
+      "frame": "1h",
+      "before": "expansion",
+      "after": "unchanged",
+      "before_ratio": "1.000000000000002",
+      "after_ratio": "1.0"
+    },
+    {
+      "symbol": "ZECUSDT",
+      "decision_time_ms": "1672218000000",
+      "frame": "4h",
+      "before": "expansion",
+      "after": "unchanged",
+      "before_ratio": "1.0000000000000009",
+      "after_ratio": "1.0"
+    },
+    {
+      "symbol": "ZECUSDT",
+      "decision_time_ms": "1678402800000",
+      "frame": "1h",
+      "before": "expansion",
+      "after": "unchanged",
+      "before_ratio": "1.0000000000000007",
+      "after_ratio": "1.0"
+    }
+  ],
+  "primary_account_class_changes": [
+    {
+      "policy": "T20_CONT",
+      "symbol": "SOLUSDT",
+      "entry_time_ms": "1787144400000",
+      "frame": "1h",
+      "before": "expansion",
+      "after": "unchanged"
+    }
+  ],
+  "all_32232_archived_trade_financial_fields_identical": true,
+  "account_summary_csv_byte_identical": true,
+  "hypothesis_contrasts_csv_byte_identical": true,
+  "data_quality_csv_byte_identical": true,
+  "before_feature_sha256": "f582aeaf5e2d726d86651adffbe68baf2d6a1ea7cd54a91b9570937079fe6fb3",
+  "after_feature_sha256": "c50ce9340aef78f9b64150bd16e5422880247fdf8449f31a7e147db16185efae",
+  "all_profile_trade_classification_rows_changed": 24,
+  "state_statistic_rows_changed": 176,
+  "before_code_commit": "1eb05b416a21a5b7110ea5cd186bb67ae8a41713",
+  "after_diagnostic_code_sha256": "a661dcd172394872fa6158835408ef5b9967037b3c63f44a2f59bf7d6cec7578"
+}
