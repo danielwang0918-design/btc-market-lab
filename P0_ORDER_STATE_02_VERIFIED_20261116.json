@@ -1,0 +1,288 @@
+{
+  "version": "p0-order-state-evidence-gate-v1",
+  "status": "verified_1h_only_observational",
+  "source_replay_version": "order-state-1h-ob-observational-v1",
+  "decision_timeframes_only": [
+    "1h",
+    "4h",
+    "1d"
+  ],
+  "subhour_used": false,
+  "orders_placed": false,
+  "strategy_changed": false,
+  "source_symbols": [
+    "BTCUSDT",
+    "ETHUSDT",
+    "SOLUSDT"
+  ],
+  "by_symbol": {
+    "BTCUSDT": {
+      "symbol": "BTCUSDT",
+      "report_sha256": "3ea6117176d5a63d12d2be2bd2e924468365b95fd0c9ee828af61635c78e509f",
+      "events_sha256": "913ebd3ff6e9a6697ae4166cda7866507f1d8e2a2844fa95ed16f9cdd4ac52fd",
+      "splits": {
+        "train": {
+          "observed_signal_count": 419,
+          "modeled_fills": 101,
+          "no_fill_pending_cancellations": 318,
+          "pending_at_split_end_unresolved": 0,
+          "target_zone_same_1h_cancellations": 1,
+          "baseline_trades_verified": 101,
+          "closed_loop_accounting": true,
+          "event_counts": {
+            "signal_accepted_pending_from_closed_1h": 419,
+            "pending_target_without_zone_cancel": 222,
+            "pending_ob_wick_touch_modeled_fill": 101,
+            "position_exit": 65,
+            "pending_signal_changed_cancel": 94,
+            "position_same_hour_exit": 36,
+            "pending_data_gap_cancel": 1,
+            "pending_target_and_zone_same_hour_cancel": 1
+          },
+          "same_hour_target_zone_classification": {
+            "intrabar_target_vs_zone_order_unknown": 1
+          },
+          "irreducibly_ambiguous_same_hour_orders": 1,
+          "min_claimable_recovered_profitable_trades": 0,
+          "validation_basis": "1h/4h/1d replay outputs, not execution fills"
+        },
+        "validation": {
+          "observed_signal_count": 169,
+          "modeled_fills": 25,
+          "no_fill_pending_cancellations": 144,
+          "pending_at_split_end_unresolved": 0,
+          "target_zone_same_1h_cancellations": 1,
+          "baseline_trades_verified": 25,
+          "closed_loop_accounting": true,
+          "event_counts": {
+            "signal_accepted_pending_from_closed_1h": 169,
+            "pending_target_without_zone_cancel": 82,
+            "pending_ob_wick_touch_modeled_fill": 25,
+            "position_same_hour_exit": 13,
+            "position_exit": 12,
+            "pending_signal_changed_cancel": 61,
+            "pending_target_and_zone_same_hour_cancel": 1
+          },
+          "same_hour_target_zone_classification": {
+            "intrabar_target_vs_zone_order_unknown": 1
+          },
+          "irreducibly_ambiguous_same_hour_orders": 1,
+          "min_claimable_recovered_profitable_trades": 0,
+          "validation_basis": "1h/4h/1d replay outputs, not execution fills"
+        },
+        "test": {
+          "observed_signal_count": 153,
+          "modeled_fills": 36,
+          "no_fill_pending_cancellations": 117,
+          "pending_at_split_end_unresolved": 0,
+          "target_zone_same_1h_cancellations": 1,
+          "baseline_trades_verified": 36,
+          "closed_loop_accounting": true,
+          "event_counts": {
+            "signal_accepted_pending_from_closed_1h": 153,
+            "pending_target_without_zone_cancel": 84,
+            "pending_signal_changed_cancel": 32,
+            "pending_ob_wick_touch_modeled_fill": 36,
+            "position_exit": 24,
+            "position_same_hour_exit": 12,
+            "pending_target_and_zone_same_hour_cancel": 1
+          },
+          "same_hour_target_zone_classification": {
+            "intrabar_target_vs_zone_order_unknown": 1
+          },
+          "irreducibly_ambiguous_same_hour_orders": 1,
+          "min_claimable_recovered_profitable_trades": 0,
+          "validation_basis": "1h/4h/1d replay outputs, not execution fills"
+        }
+      }
+    },
+    "ETHUSDT": {
+      "symbol": "ETHUSDT",
+      "report_sha256": "2c8bb0dcb398aa16f4b3ab1ca97fd5950ddcde137d665fc0bbd26347b7744aa8",
+      "events_sha256": "cd9f2bf7b98e7a68b921b16fc40a19e420a6fe4d12a99851a50065071c0acf2a",
+      "splits": {
+        "train": {
+          "observed_signal_count": 479,
+          "modeled_fills": 112,
+          "no_fill_pending_cancellations": 367,
+          "pending_at_split_end_unresolved": 0,
+          "target_zone_same_1h_cancellations": 0,
+          "baseline_trades_verified": 112,
+          "closed_loop_accounting": true,
+          "event_counts": {
+            "signal_accepted_pending_from_closed_1h": 479,
+            "pending_ob_wick_touch_modeled_fill": 112,
+            "position_same_hour_exit": 38,
+            "pending_signal_changed_cancel": 114,
+            "pending_target_without_zone_cancel": 252,
+            "position_exit": 74,
+            "pending_data_gap_cancel": 1
+          },
+          "same_hour_target_zone_classification": {},
+          "irreducibly_ambiguous_same_hour_orders": 0,
+          "min_claimable_recovered_profitable_trades": 0,
+          "validation_basis": "1h/4h/1d replay outputs, not execution fills"
+        },
+        "validation": {
+          "observed_signal_count": 175,
+          "modeled_fills": 38,
+          "no_fill_pending_cancellations": 137,
+          "pending_at_split_end_unresolved": 0,
+          "target_zone_same_1h_cancellations": 2,
+          "baseline_trades_verified": 38,
+          "closed_loop_accounting": true,
+          "event_counts": {
+            "signal_accepted_pending_from_closed_1h": 175,
+            "pending_target_without_zone_cancel": 84,
+            "pending_signal_changed_cancel": 51,
+            "pending_ob_wick_touch_modeled_fill": 38,
+            "position_exit": 23,
+            "position_same_hour_exit": 15,
+            "pending_target_and_zone_same_hour_cancel": 2
+          },
+          "same_hour_target_zone_classification": {
+            "intrabar_target_vs_zone_order_unknown": 2
+          },
+          "irreducibly_ambiguous_same_hour_orders": 2,
+          "min_claimable_recovered_profitable_trades": 0,
+          "validation_basis": "1h/4h/1d replay outputs, not execution fills"
+        },
+        "test": {
+          "observed_signal_count": 188,
+          "modeled_fills": 44,
+          "no_fill_pending_cancellations": 144,
+          "pending_at_split_end_unresolved": 0,
+          "target_zone_same_1h_cancellations": 0,
+          "baseline_trades_verified": 44,
+          "closed_loop_accounting": true,
+          "event_counts": {
+            "signal_accepted_pending_from_closed_1h": 188,
+            "pending_target_without_zone_cancel": 91,
+            "pending_ob_wick_touch_modeled_fill": 44,
+            "position_exit": 30,
+            "pending_signal_changed_cancel": 53,
+            "position_same_hour_exit": 14
+          },
+          "same_hour_target_zone_classification": {},
+          "irreducibly_ambiguous_same_hour_orders": 0,
+          "min_claimable_recovered_profitable_trades": 0,
+          "validation_basis": "1h/4h/1d replay outputs, not execution fills"
+        }
+      }
+    },
+    "SOLUSDT": {
+      "symbol": "SOLUSDT",
+      "report_sha256": "1a0554e3c45dd2572aeebbf98329c5fa75a564550d0301cd24ceac0910d28cbe",
+      "events_sha256": "b1f7c1fc5a46395a792d64f084844005c214ec7e02b4856db3e7a60856ce228a",
+      "splits": {
+        "train": {
+          "observed_signal_count": 275,
+          "modeled_fills": 68,
+          "no_fill_pending_cancellations": 207,
+          "pending_at_split_end_unresolved": 0,
+          "target_zone_same_1h_cancellations": 0,
+          "baseline_trades_verified": 68,
+          "closed_loop_accounting": true,
+          "event_counts": {
+            "signal_accepted_pending_from_closed_1h": 275,
+            "pending_target_without_zone_cancel": 140,
+            "pending_ob_wick_touch_modeled_fill": 68,
+            "position_exit": 58,
+            "pending_signal_changed_cancel": 66,
+            "position_same_hour_exit": 10,
+            "pending_data_gap_cancel": 1
+          },
+          "same_hour_target_zone_classification": {},
+          "irreducibly_ambiguous_same_hour_orders": 0,
+          "min_claimable_recovered_profitable_trades": 0,
+          "validation_basis": "1h/4h/1d replay outputs, not execution fills"
+        },
+        "validation": {
+          "observed_signal_count": 176,
+          "modeled_fills": 45,
+          "no_fill_pending_cancellations": 131,
+          "pending_at_split_end_unresolved": 0,
+          "target_zone_same_1h_cancellations": 0,
+          "baseline_trades_verified": 45,
+          "closed_loop_accounting": true,
+          "event_counts": {
+            "signal_accepted_pending_from_closed_1h": 176,
+            "pending_ob_wick_touch_modeled_fill": 45,
+            "position_exit": 34,
+            "pending_target_without_zone_cancel": 84,
+            "pending_signal_changed_cancel": 47,
+            "position_same_hour_exit": 11
+          },
+          "same_hour_target_zone_classification": {},
+          "irreducibly_ambiguous_same_hour_orders": 0,
+          "min_claimable_recovered_profitable_trades": 0,
+          "validation_basis": "1h/4h/1d replay outputs, not execution fills"
+        },
+        "test": {
+          "observed_signal_count": 178,
+          "modeled_fills": 43,
+          "no_fill_pending_cancellations": 135,
+          "pending_at_split_end_unresolved": 0,
+          "target_zone_same_1h_cancellations": 0,
+          "baseline_trades_verified": 43,
+          "closed_loop_accounting": true,
+          "event_counts": {
+            "signal_accepted_pending_from_closed_1h": 178,
+            "pending_signal_changed_cancel": 51,
+            "pending_target_without_zone_cancel": 84,
+            "pending_ob_wick_touch_modeled_fill": 43,
+            "position_exit": 33,
+            "position_same_hour_exit": 10
+          },
+          "same_hour_target_zone_classification": {},
+          "irreducibly_ambiguous_same_hour_orders": 0,
+          "min_claimable_recovered_profitable_trades": 0,
+          "validation_basis": "1h/4h/1d replay outputs, not execution fills"
+        }
+      }
+    }
+  },
+  "split_totals": {
+    "train": {
+      "observed_signal_count": 1173,
+      "modeled_fills": 281,
+      "no_fill_pending_cancellations": 892,
+      "pending_at_split_end_unresolved": 0,
+      "target_zone_same_1h_cancellations": 1
+    },
+    "validation": {
+      "observed_signal_count": 520,
+      "modeled_fills": 108,
+      "no_fill_pending_cancellations": 412,
+      "pending_at_split_end_unresolved": 0,
+      "target_zone_same_1h_cancellations": 3
+    },
+    "test": {
+      "observed_signal_count": 519,
+      "modeled_fills": 123,
+      "no_fill_pending_cancellations": 396,
+      "pending_at_split_end_unresolved": 0,
+      "target_zone_same_1h_cancellations": 1
+    }
+  },
+  "target_zone_ordering": {
+    "train": {
+      "intrabar_target_vs_zone_order_unknown": 1
+    },
+    "validation": {
+      "intrabar_target_vs_zone_order_unknown": 3
+    },
+    "test": {
+      "intrabar_target_vs_zone_order_unknown": 1
+    }
+  },
+  "cannot_infer_recovered_win_rate": true,
+  "limitations": [
+    "Only closed 1H/4H/1D decisions. No 1m/15m candles or trading API.",
+    "Wick-touch modeled entry is not a verifiable executed limit order.",
+    "OB+target both touched in one 1H candle do not reveal first-touch order.",
+    "No recovered trade, profit or changed win rate is inferred from canceled setups.",
+    "The Test period was previously inspected; this is not independent forward validation.",
+    "Current-volume-selected symbol universe contains survivorship and selection bias."
+  ]
+}
