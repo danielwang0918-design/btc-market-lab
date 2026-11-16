@@ -1,0 +1,42 @@
+name: P2-02 risk inspection contract tests
+on:
+  push:
+    branches: ["codex/p2-02-risk-inspection-v1"]
+  pull_request:
+    branches: ["p2-macro-event-risk"]
+    paths:
+      - "p2_risk_inspection.py"
+      - "test_p2_risk_inspection.py"
+      - "P2_02_RISK_INSPECTION.md"
+      - "examples/p2_02_empty_evidence.json"
+      - ".github/workflows/p2-risk-inspection.yml"
+permissions:
+  contents: read
+jobs:
+  offline-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - name: Run offline contract and existing P2 calendar tests
+        run: |
+          python -m unittest -v test_p2_risk_inspection.py
+          python -m unittest -v test_event_risk.py
+      - name: Verify empty-evidence CLI replay is level 2 and retains 11 sections
+        run: |
+          python p2_risk_inspection.py --evidence examples/p2_02_empty_evidence.json --out-dir /tmp/p2-empty-replay
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          result=json.loads(Path('/tmp/p2-empty-replay/inspection.json').read_text())
+          md=Path('/tmp/p2-empty-replay/inspection.md').read_text()
+          assert result['level']==2 and len(result['missing_categories'])==13
+          assert md.count('## ')==11
+          assert result['trade_signal'] is False
+          print('Fail-closed CLI replay validated: 13 missing categories; 11 report sections; no trade signal.')
+          PY
+      - name: CLI help (no network)
+        run: python p2_risk_inspection.py --help
