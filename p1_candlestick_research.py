@@ -17,11 +17,13 @@ import statistics
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Iterable
 from zipfile import ZipFile
 
-VERSION = 'p1-candlestick-geometry-v1'
+VERSION = 'p1-candlestick-geometry-v1.1'
+GEOMETRY_SPEC_VERSION = 'p1-candlestick-geometry-v1'  # unchanged predicates/thresholds
 LOCK_SHA256 = '42c0d049a8f277934b2908767869e1c6830009c47f346463140c9abac7549dbf'
 FRAMES = {'1h': 3_600_000, '4h': 14_400_000, '1d': 86_400_000}
 PATTERNS = ('bullish_engulfing', 'bearish_engulfing', 'morning_star',
@@ -33,25 +35,30 @@ FEE_BPS_SIDE = 10
 SLIPPAGE_BPS_SIDE = 5
 OUTPUT_COLUMNS = ['symbol','timeframe','pattern','direction','split','signal_close_utc',
                   'signal_open_ms','prior_trend_3','atr14_before_signal','horizon_hours',
-                  'outcome_status','entry_next_open_utc','exit_close_utc','directional_favorable_pct',
+                  'outcome_status','censor_reason','entry_next_open_utc','exit_close_utc','directional_favorable_pct',
                   'paper_net_pct']
 
 
 @dataclass(frozen=True)
 class Candle:
     open_ms: int
-    o: float
-    h: float
-    l: float
-    c: float
-    v: float
+    o: Decimal
+    h: Decimal
+    l: Decimal
+    c: Decimal
+    v: Decimal
+
+    def __post_init__(self) -> None:
+        # Keep the CSV's decimal prices. Also accept numeric synthetic fixtures.
+        for name in ('o','h','l','c','v'):
+            object.__setattr__(self,name,Decimal(str(getattr(self,name))))
 
     @property
-    def body(self) -> float:
+    def body(self) -> Decimal:
         return abs(self.c - self.o)
 
     @property
-    def full_range(self) -> float:
+    def full_range(self) -> Decimal:
         return self.h - self.l
 
     @property
@@ -63,8 +70,8 @@ class Candle:
         return self.c < self.o
 
     @property
-    def body_ratio(self) -> float:
-        return self.body / self.full_range if self.full_range > 0 else 0.
+    def body_ratio(self) -> Decimal:
+        return self.body / self.full_range if self.full_range > 0 else Decimal(0)
 
 
 def sha(data: bytes) -> str:
@@ -88,7 +95,8 @@ def read_lock(path: Path) -> dict[str, Any]:
     return obj
 
 
-def parse_bars(raw: bytes, symbol: str, frame: str, expected: int) -> list[Candle]:
+def parse_bars(raw: bytes, symbol: str, frame: str, expected: int,
+               *, closed_through_ms: int | None = None) -> list[Candle]:
     if frame not in FRAMES:
         raise ValueError('Trading data may be only 1h / 4h / 1d')
     step = FRAMES[frame]
@@ -104,8 +112,13 @@ def parse_bars(raw: bytes, symbol: str, frame: str, expected: int) -> list[Candl
         t = int(r['open_time'])
         if t % step or int(r['close_time']) != t + step - 1 or (prior is not None and t <= prior):
             raise ValueError('Misaligned, duplicate or unsorted OHLCV timestamps')
-        o, h, l, c, v = (float(r[x]) for x in ('open','high','low','close','volume'))
-        if not all(math.isfinite(x) for x in (o,h,l,c,v)) or not (l > 0 and v >= 0 and l <= min(o,c) <= max(o,c) <= h):
+        if closed_through_ms is not None and t+step > closed_through_ms:
+            raise ValueError('Candle exceeds locked closed-bar cutoff')
+        try:
+            o, h, l, c, v = (Decimal(r[x]) for x in ('open','high','low','close','volume'))
+        except InvalidOperation as exc:
+            raise ValueError('Invalid OHLCV number') from exc
+        if not all(x.is_finite() for x in (o,h,l,c,v)) or not (l > 0 and v >= 0 and l <= min(o,c) <= max(o,c) <= h):
             raise ValueError('Invalid or nonfinite OHLCV')
         bars.append(Candle(t,o,h,l,c,v))
         prior=t
@@ -127,27 +140,28 @@ def confirmed_at(bars: list[Candle], idx: int, start: int) -> list[tuple[str,str
         return []
     a, b = bars[idx-1], bars[idx]
     out = []
-    if a.bearish and b.bullish and b.o <= a.c and b.c >= a.o and b.body > a.body and b.body_ratio >= 0.4:
+    # Integer cross-products avoid floating-point errors at inclusive thresholds.
+    if a.bearish and b.bullish and b.o <= a.c and b.c >= a.o and b.body > a.body and 100*b.body >= 40*b.full_range:
         out.append(('bullish_engulfing','long'))
-    if a.bullish and b.bearish and b.o >= a.c and b.c <= a.o and b.body > a.body and b.body_ratio >= 0.4:
+    if a.bullish and b.bearish and b.o >= a.c and b.c <= a.o and b.body > a.body and 100*b.body >= 40*b.full_range:
         out.append(('bearish_engulfing','short'))
     if idx >= start+2:
         x, y, z = bars[idx-2],bars[idx-1],bars[idx]
-        if (x.bearish and x.body_ratio >= .5 and x.body > 0
-                and y.body <= .35*x.body and z.bullish and z.body_ratio >= .5
-                and max(y.o,y.c) <= (x.o+x.c)/2
-                and z.c >= (x.o+x.c)/2):
+        if (x.bearish and 2*x.body >= x.full_range and x.body > 0
+                and 100*y.body <= 35*x.body and z.bullish and 2*z.body >= z.full_range
+                and 2*max(y.o,y.c) <= x.o+x.c
+                and 2*z.c >= x.o+x.c):
             out.append(('morning_star','long'))
         seq = (x,y,z)
-        if (all(q.bullish and q.body_ratio>=.55 for q in seq)
+        if (all(q.bullish and 100*q.body>=55*q.full_range for q in seq)
                 and x.c<y.c<z.c and x.o<=y.o<=z.o
                 and y.o<=x.c and z.o<=y.c
-                and all((q.h-q.c) <= .5*q.body for q in seq)):
+                and all(2*(q.h-q.c) <= q.body for q in seq)):
             out.append(('three_white_soldiers','long'))
-        if (all(q.bearish and q.body_ratio>=.55 for q in seq)
+        if (all(q.bearish and 100*q.body>=55*q.full_range for q in seq)
                 and x.c>y.c>z.c and x.o>=y.o>=z.o
                 and y.o>=x.c and z.o>=y.c
-                and all((q.c-q.l) <= .5*q.body for q in seq)):
+                and all(2*(q.c-q.l) <= q.body for q in seq)):
             out.append(('three_black_crows','short'))
     return out
 
@@ -167,7 +181,9 @@ def atr14_before(bars: list[Candle], first: int, start: int) -> float | None:
     for i in range(first-14,first):
         p=bars[i-1]
         b=bars[i]
-        vals.append(max(b.h-b.l, abs(b.h-p.c), abs(b.l-p.c)))
+        # ATR is an observation only; retain v1 float arithmetic for comparability.
+        vals.append(max(float(b.h)-float(b.l), abs(float(b.h)-float(p.c)),
+                        abs(float(b.l)-float(p.c))))
     return sum(vals)/len(vals)
 
 
@@ -188,8 +204,9 @@ def split_end(split: str, dataset_close_exclusive: int) -> int:
 
 
 def paper_return(entry: float, exit_: float, side: str) -> tuple[float,float]:
-    """Direction and hypothetical fixed holding net %.  Spot shorts are NOT executable."""
-    if entry <= 0 or exit_ <= 0 or side not in ('long','short'):
+    """Net PnL / slipped entry notional (not fee-inclusive cash or short margin)."""
+    entry,exit_=float(entry),float(exit_)
+    if not math.isfinite(entry) or not math.isfinite(exit_) or entry <= 0 or exit_ <= 0 or side not in ('long','short'):
         raise ValueError('Bad hypothetical fill input')
     slip = SLIPPAGE_BPS_SIDE/10000
     fee = FEE_BPS_SIDE/10000
@@ -207,8 +224,9 @@ def study_rows(bars: list[Candle], symbol: str, frame: str,
     if frame not in FRAMES:
         raise ValueError('Only 1h,4h,1d')
     step = FRAMES[frame]
-    if any(h <= 0 or (h*3_600_000)%step for h in horizons):
-        raise ValueError('All forward durations must be positive multiples of timeframe')
+    if (not horizons or any(type(h) is not int or h <= 0 or (h*3_600_000)%step for h in horizons)
+            or len(set(horizons)) != len(horizons)):
+        raise ValueError('Forward durations must be distinct positive integer multiples of timeframe')
     start_by_i=contiguous_segment_start(bars,step)
     result=[]
     end=bars[-1].open_ms+step if bars else 0
@@ -225,8 +243,25 @@ def study_rows(bars: list[Candle], symbol: str, frame: str,
             atr=atr14_before(bars,first,segment_start)
             for h in horizons:
                 k=i+h*3_600_000//step
-                eligible=(k<len(bars) and start_by_i[k]==segment_start
-                          and bars[k].open_ms+step<=split_end(split,end))
+                expected_exit=signal_close+h*3_600_000
+                # One primary cause per row: boundary, then exhausted history,
+                # then an interior gap. No missing candle is filled or skipped.
+                if split != 'exploratory_test_opened' and expected_exit > split_end(split,end):
+                    reason='split_boundary'
+                elif expected_exit > end:
+                    reason='incomplete_followup'
+                elif k>=len(bars) or start_by_i[k]!=segment_start:
+                    reason='data_gap'
+                else:
+                    reason=None
+                # Outcome availability only, never a future-volume signal filter.
+                # A zero-volume OHLC quote provides no fixed-time execution price.
+                fill_unavailable=False
+                if reason is None and (bars[i+1].v==0 or bars[k].v==0):
+                    fill_unavailable=True
+                    reason=('zero_volume_entry_and_exit' if bars[i+1].v==0 and bars[k].v==0
+                            else 'zero_volume_entry' if bars[i+1].v==0 else 'zero_volume_exit')
+                eligible=reason is None
                 entry=bars[i+1].o if eligible else None
                 exit_=bars[k].c if eligible else None
                 direction,net=paper_return(entry,exit_,side) if eligible else (None,None)
@@ -236,7 +271,9 @@ def study_rows(bars: list[Candle], symbol: str, frame: str,
                     'signal_open_ms':b.open_ms,'prior_trend_3':preceding,
                     'atr14_before_signal':round(atr,8) if atr is not None else None,
                     'horizon_hours':h,
-                    'outcome_status':'evaluated' if eligible else 'right_censored_or_split_boundary',
+                    'outcome_status':('evaluated' if eligible else 'unavailable_fixed_time_fill'
+                                      if fill_unavailable else 'right_censored_or_split_boundary'),
+                    'censor_reason':reason,
                     'entry_next_open_utc':utc(bars[i+1].open_ms) if eligible else None,
                     'exit_close_utc':utc(bars[k].open_ms+step) if eligible else None,
                     'directional_favorable_pct':round(direction,8) if eligible else None,
@@ -245,10 +282,17 @@ def study_rows(bars: list[Candle], symbol: str, frame: str,
     return result
 
 
-def summarize(rows: list[dict[str,Any]]) -> list[dict[str, Any]]:
+def summarize(rows: list[dict[str,Any]], *, symbols: Iterable[str] = ()) -> list[dict[str, Any]]:
     grouped=defaultdict(list)
     for r in rows:
         grouped[(r['symbol'],r['timeframe'],r['pattern'],r['split'],r['horizon_hours'])].append(r)
+    contexts={(r['symbol'],r['timeframe'],r['split'],r['horizon_hours']) for r in rows}
+    contexts.update((s,f,split,h) for s in symbols for f in FRAMES
+                    for split in ('train','validation','exploratory_test_opened')
+                    for h in HORIZONS_HOURS)
+    for s,frame,split,h in contexts:
+        for kind in PATTERNS:
+            grouped[(s,frame,kind,split,h)]  # explicit zero-sample groups, null rates
     out=[]
     for (s,frame,kind,split,h),items in sorted(grouped.items()):
         evaluable=[r for r in items if r['outcome_status']=='evaluated']
@@ -256,7 +300,8 @@ def summarize(rows: list[dict[str,Any]]) -> list[dict[str, Any]]:
         gross=[r['directional_favorable_pct'] for r in evaluable]
         out.append({'symbol':s,'timeframe':frame,'pattern':kind,'split':split,'horizon_hours':h,
                     'observed_signals':len(items),'evaluated':len(evaluable),
-                    'right_censored':len(items)-len(evaluable),
+                    'right_censored':sum(r['outcome_status']=='right_censored_or_split_boundary' for r in items),
+                    'paper_fill_unavailable':sum(r['outcome_status']=='unavailable_fixed_time_fill' for r in items),
                     'directional_positive_percent':round(100*sum(x>0 for x in gross)/len(gross),4) if gross else None,
                     'net_positive_percent_paper':round(100*sum(x>0 for x in net)/len(net),4) if net else None,
                     'mean_paper_net_pct':round(statistics.mean(net),6) if net else None,
@@ -271,9 +316,13 @@ def main(argv: list[str]|None=None) -> int:
     p.add_argument('--out-dir',type=Path,default=Path('research/p1_01'))
     a=p.parse_args(argv)
     lock=read_lock(a.lock)
-    output=[];input_sha={};bars_by_file={}
+    output=[];input_sha={};bars_by_file={};data_integrity={}
     with ZipFile(a.frozen_archive) as z:
-        archive_files=set(z.namelist())
+        archive_files=z.namelist()
+        if len(set(archive_files)) != len(archive_files):
+            raise ValueError('Duplicate archive members; ambiguous frozen evidence')
+        sources={}
+        # Preflight every required input digest before doing any pattern research.
         for symbol in lock['symbols']:
             for frame in ('1h','4h','1d'):
                 fname=f'{symbol}_{frame}.csv'
@@ -283,17 +332,41 @@ def main(argv: list[str]|None=None) -> int:
                 raw=z.read(fname)
                 if sha(raw)!=meta['sha256'] or len(raw)!=meta['bytes']:
                     raise ValueError(f'FROZEN DATA SHA256 MISMATCH: {fname}')
-                candles=parse_bars(raw,symbol,frame,meta['frozen_bars'])
+                sources[fname]=raw
                 input_sha[fname]=sha(raw)
+        for symbol in lock['symbols']:
+            for frame in FRAMES:
+                fname=f'{symbol}_{frame}.csv'
+                meta=lock['frozen_data_prefixes'][fname]
+                candles=parse_bars(sources.pop(fname),symbol,frame,meta['frozen_bars'],
+                                   closed_through_ms=meta['frozen_last_close_exclusive_ms'])
+                if candles[-1].open_ms+FRAMES[frame] != meta['frozen_last_close_exclusive_ms']:
+                    raise ValueError(f'Frozen last-close cutoff mismatch: {fname}')
                 bars_by_file[fname]=len(candles)
+                gaps=[{'after_open_ms':p.open_ms,'next_open_ms':b.open_ms,
+                       'missing_bars':(b.open_ms-p.open_ms)//FRAMES[frame]-1}
+                      for p,b in zip(candles,candles[1:]) if b.open_ms-p.open_ms>FRAMES[frame]]
+                data_integrity[fname]={'first_open_utc':utc(candles[0].open_ms),
+                    'last_close_exclusive_utc':utc(candles[-1].open_ms+FRAMES[frame]),
+                    'gap_segments':len(gaps),'missing_bars':sum(g['missing_bars'] for g in gaps),
+                    'gaps':gaps}
                 output.extend(study_rows(candles,symbol,frame))
-    summary=summarize(output)
+    summary=summarize(output,symbols=lock['symbols'])
     # Output complete unselected results: no best-performing-pattern ranking.
     manifest={'version':VERSION,'status':'exploratory_frozen_history_only',
+              'geometry_spec_version':GEOMETRY_SPEC_VERSION,
+              'geometry_arithmetic':'exact_decimal_prices_integer_cross_products_no_epsilon',
+              'research_code_sha256':sha(Path(__file__).read_bytes()),
               'source_run':43820018876,'source_archive_sha256':sha(a.frozen_archive.read_bytes()),
               'lock_sha256':LOCK_SHA256,'input_sha256':input_sha,'bars_by_file':bars_by_file,
+              'data_integrity_by_file':data_integrity,
               'patterns':PATTERNS,'timeframes':list(FRAMES),'fixed_horizons_hours':list(HORIZONS_HOURS),
               'fee_bps_per_side':FEE_BPS_SIDE,'slippage_bps_per_side':SLIPPAGE_BPS_SIDE,
+              'paper_return_denominator':'slipped_entry_notional_excludes_entry_fee_and_margin',
+              'fill_assumption':'zero_latency_next_bar_open_then_fixed_horizon_close_with_adverse_slippage',
+              'outcome_unavailable_primary_reason_counts':dict(Counter(r['censor_reason'] for r in output
+                                                                     if r['censor_reason'] is not None)),
+              'zero_volume_fill_policy':'retain_signal_censor_outcome_no_delayed_fill_or_volume_signal_filter',
               'observed_pattern_horizon_rows':len(output),
               'unique_pattern_events':len({(r['symbol'],r['timeframe'],r['pattern'],r['signal_open_ms']) for r in output}),
               'outcome_rows_evaluated':sum(r['outcome_status']=='evaluated' for r in output),
@@ -310,7 +383,7 @@ def main(argv: list[str]|None=None) -> int:
         writer=csv.DictWriter(f,fieldnames=OUTPUT_COLUMNS)
         writer.writeheader();writer.writerows(output)
     with (a.out_dir/'p1_01_summary.csv').open('w',encoding='utf-8-sig',newline='') as f:
-        keys=['symbol','timeframe','pattern','split','horizon_hours','observed_signals','evaluated','right_censored','directional_positive_percent','net_positive_percent_paper','mean_paper_net_pct','median_paper_net_pct']
+        keys=['symbol','timeframe','pattern','split','horizon_hours','observed_signals','evaluated','right_censored','paper_fill_unavailable','directional_positive_percent','net_positive_percent_paper','mean_paper_net_pct','median_paper_net_pct']
         writer=csv.DictWriter(f,fieldnames=keys)
         writer.writeheader();writer.writerows(summary)
     totals=Counter((r['pattern'] for r in output if r['horizon_hours']==24))
