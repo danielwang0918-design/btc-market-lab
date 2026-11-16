@@ -8,6 +8,10 @@ on:
       - "test_stop_loss_research.py"
       - "trade_diagnostics.py"
       - "test_trade_diagnostics.py"
+      - "pattern_research.py"
+      - "test_pattern_research.py"
+      - "pattern_trade_study.py"
+      - "test_pattern_trade_study.py"
       - "historical_backtest.py"
       - "market_structure.py"
       - "market_research.py"
@@ -25,7 +29,7 @@ concurrency:
 
 jobs:
   comparison:
-    name: Compare stops and diagnose individual trades
+    name: Compare stops, diagnose trades, observe causal patterns
     runs-on: ubuntu-latest
     timeout-minutes: 360
     steps:
@@ -49,34 +53,46 @@ jobs:
           --atr-multiple 0.25
       - name: Diagnose every simulated trade
         run: python -u trade_diagnostics.py
+      - name: Observe causal Elliott/harmonic candidates and MFE uncertainty
+        run: python -u pattern_trade_study.py --data-dir data/historical --output-dir data/historical
       - name: Publish diagnostic summary
         if: always()
         run: |
-          python - <<'PY'
+          python - <<'PY2'
           import json, os
           from pathlib import Path
-          path=Path("data/historical/BTCUSDT_trade_diagnostics.json")
-          summary=os.environ.get("GITHUB_STEP_SUMMARY")
-          if not path.exists():
-              message="The trade diagnostics report was not produced. Inspect earlier workflow steps."
-              print(message)
-              if summary:
-                  with open(summary,"a",encoding="utf-8") as f: f.write("# BTC trade diagnostics\n\n"+message+"\n")
-              raise SystemExit(0)
-          report=json.loads(path.read_text(encoding="utf-8"))
-          lines=["# BTCUSDT per-trade diagnostics","",
-          "- MFE/MAE include hourly extremes through the exit candle; exit-candle intrabar order is unknowable from OHLC.",
-          "- 4H alignment requires last closed 4H close vs EMA20 and 3-bar EMA20 slope to agree with direction.",
-          "","| Variant | Split | Trades | Mean MFE (R) | Mean MAE (R) | Losing trades MFE >= 0.5R | Losing trades MFE >= 1R | 4H aligned | 4H opposed | Rapid stops |",
-          "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|"]
-          for name,v in report["variants"].items():
-              for split in ("train","validation","test"):
-                  x=v["splits"][split]["all"]
-                  lines.append(f'| {name} | {split} | {x["trades"]} | {x["mean_mfe_r"]} | {x["mean_mae_r"]} | {x["losers_reached_mfe_0_5r"]} | {x["losers_reached_mfe_1r"]} | {x["trend_aligned"]} | {x["trend_opposed"]} | {x["rapid_stops_le_2_bars"]}/{x["stop_count"]} |')
-          text="\n".join(lines)+"\n"; print(text)
+          root = Path("data/historical")
+          path = root / "BTCUSDT_trade_diagnostics.json"
+          pattern_path = root / "BTCUSDT_pattern_trade_study.json"
+          summary = os.environ.get("GITHUB_STEP_SUMMARY")
+          lines = ["# BTCUSDT trade diagnostics and pattern-as-of research", ""]
+          if path.exists():
+              report = json.loads(path.read_text(encoding="utf-8"))
+              lines += ["Original MFE/MAE includes entry/exit hourly candle extremes and may reflect unobservable intrabar order.", ""]
+              lines += ["| Variant | Split | Trades | Mean MFE (R) | Mean MAE (R) | Rapid stops |", "|---|---|---:|---:|---:|---:|"]
+              for name, variant in report["variants"].items():
+                  for split in ("train", "validation", "test"):
+                      x = variant["splits"][split]["all"]
+                      lines.append(f'| {name} | {split} | {x["trades"]} | {x["mean_mfe_r"]} | {x["mean_mae_r"]} | {x["rapid_stops_le_2_bars"]}/{x["stop_count"]} |')
+          else:
+              lines += ["Original trade diagnosis was not produced; inspect earlier steps."]
+          if pattern_path.exists():
+              report = json.loads(pattern_path.read_text(encoding="utf-8"))
+              lines += ["", "## Boundary-ambiguous MFE and pre-decision pattern observations", ""]
+              lines += ["| Variant | Split | Losses | Full-candle MFE >=1R | Interior-only confirmed MFE >=1R | Ambiguous >=1R |", "|---|---|---:|---:|---:|---:|"]
+              for name, splits in report["variants"].items():
+                  for split in ("train", "validation", "test"):
+                      x = splits[split]["mfe_boundary_audit"]
+                      lines.append(f'| {name} | {split} | {x["losing_trades"]} | {x["reported_losers_ge_1r"]} | {x["interior_confirmed_losers_ge_1r"]} | {x["boundary_ambiguous_losers_ge_1r"]} |')
+              lines += ["", "Pattern labels are observational only, with a fixed 168h recency window and signal-time causal confirmation. No entry or exit logic changed."]
+          else:
+              lines += ["", "Pattern observation report was not produced; inspect earlier steps."]
+          text = "\n".join(lines) + "\n"
+          print(text)
           if summary:
-              with open(summary,"a",encoding="utf-8") as f: f.write(text)
-          PY
+              with open(summary, "a", encoding="utf-8") as file:
+                  file.write(text)
+          PY2
       - name: Upload data and diagnostic artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -89,5 +105,10 @@ jobs:
             data/historical/BTCUSDT_stop_loss_research.json
             data/historical/BTCUSDT_trade_diagnostics.json
             data/historical/BTCUSDT_trade_diagnostics.csv
+            data/historical/BTCUSDT_pattern_trade_study.json
+            data/historical/BTCUSDT_pattern_trade_features.csv
+            data/historical/BTCUSDT_1h_pattern_candidates.csv
+            data/historical/BTCUSDT_4h_pattern_candidates.csv
+            data/historical/BTCUSDT_1d_pattern_candidates.csv
           if-no-files-found: warn
           retention-days: 30
