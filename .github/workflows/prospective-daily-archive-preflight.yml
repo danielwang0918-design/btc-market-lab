@@ -1,0 +1,65 @@
+name: P0-08 frozen forward archive preflight (NO orders)
+
+on:
+  push:
+    branches: ["codex/**"]
+    paths:
+      - "prospective_daily_archive.py"
+      - "test_prospective_daily_archive.py"
+      - ".github/workflows/prospective-daily-archive-preflight.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: p0-08-archive-preflight-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prove:
+    name: Verify exact frozen seed and Genesis, no future observations
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - name: Run full offline regression suite
+        run: python -m unittest -v
+      - name: Get original frozen 1D 4H 1H data and Genesis certificates
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/p0-08-seed /tmp/p0-08-genesis
+          gh run download '43820018876' -R "$GITHUB_REPOSITORY" -n 'multi-asset-input-43820018876' -D /tmp/p0-08-seed
+          gh run download '43845519180' -R "$GITHUB_REPOSITORY" -n 'prospective-preregistered-43845519180' -D /tmp/p0-08-genesis
+      - name: Bootstrap and restore all 24 exact frozen K-line files
+        run: |
+          set -euo pipefail
+          python prospective_daily_archive.py bootstrap \
+            --lock PROSPECTIVE_LOCK_V1.json --repo-dir . \
+            --seed-source /tmp/p0-08-seed \
+            --genesis /tmp/p0-08-genesis/research/prospective_07/prospective_genesis.json \
+            --archive-dir research/prospective_08/archive > research/prospective_08-bootstrap.log
+          python prospective_daily_archive.py audit \
+            --lock PROSPECTIVE_LOCK_V1.json --repo-dir . \
+            --archive-dir research/prospective_08/archive > research/prospective_08-audit.log
+          cat research/prospective_08-bootstrap.log
+          cat research/prospective_08-audit.log
+      - name: Publish initial archive preflight evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p0-prospective-08-preflight-${{ github.run_id }}
+          path: |
+            research/prospective_08-bootstrap.log
+            research/prospective_08-audit.log
+            research/prospective_08/archive/archive_contract.json
+            research/prospective_08/archive/genesis.json
+            research/prospective_08/archive/latest.json
+          if-no-files-found: warn
+          retention-days: 30
