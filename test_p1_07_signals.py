@@ -2,6 +2,8 @@ import unittest
 from decimal import Decimal as D
 import p1_candlestick_research as c
 import p1_07_signals as m
+import p1_portfolio as old
+from types import SimpleNamespace
 
 DAY=86400000
 def b(t,h=110,l=90,o=100,close=100,v=1):return c.Candle(t,o,h,l,close,v)
@@ -39,4 +41,19 @@ class ReferenceTests(unittest.TestCase):
         a=A();a.bars=[b(0)];a.times=[0];a.by_time={0:0};a.snaps=[{'integrity_ok':False}]
         x=m.execution_view(a)
         self.assertTrue(x.snaps[0]['integrity_ok']);self.assertFalse(a.snaps[0]['integrity_ok'])
+    def test_next_open_on_level_is_not_confirmed_outside_or_inside(self):
+        self.assertFalse(m.entry_location('long',D(120),D(120)))
+        self.assertTrue(m.entry_location('short',D(119),D(120)))
+    def test_later_reclaim_does_not_cancel_prior_continuation_or_leak_daily_extreme(self):
+        t=old.START
+        daily=[b(t-(20-i)*DAY) for i in range(20)];daily[15]=b(t-5*DAY,h=120,l=80)
+        bars=[b(t-3600000),b(t,h=123,l=99,o=100,close=121),b(t+3600000,h=122,l=118,o=121,close=119),b(t+7200000,h=999,l=1,o=119,close=120),b(t+10800000)]
+        a=SimpleNamespace(symbol='BTCUSDT',bars=bars,frames={'1d':daily},reg=SimpleNamespace(atr=[1]*5),by_time={x.open_ms:i for i,x in enumerate(bars)},times=[x.open_ms for x in bars])
+        a.stop_context_cache={x.open_ms:dict(feature_cutoff_ms=x.open_ms,atr=1,volatility='normal') for x in bars}
+        rows,_=m.generate(a)
+        c=next(r for r in rows if r['policy']=='T20_CONT' and r['edge']=='upper')
+        f=next(r for r in rows if r['policy']=='T20_FAIL' and r['edge']=='upper')
+        self.assertEqual(c['entry_time_ms'],t+3600000)
+        self.assertEqual(f['entry_time_ms'],t+7200000)
+        self.assertEqual(f['stop'],D('123.1'))
 if __name__=='__main__':unittest.main()

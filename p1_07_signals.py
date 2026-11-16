@@ -30,15 +30,18 @@ def intraday_prefix(bars,i):
 def arm_side(policy,edge):
     return ('long' if edge=='upper' else 'short') if policy=='T20_CONT' else ('short' if edge=='upper' else 'long')
 
+def entry_location(side,price,level):return price>level if side=='long' else price<level
+
 def execution_view(a):
     return SimpleNamespace(bars=a.bars,times=a.times,by_time=a.by_time,snaps=[{'integrity_ok':True} for _ in a.bars])
 
 def generate(a):
-    plans=[];availability=Counter();day_seen={}
+    plans=[];availability=Counter();day_seen={};references={}
     for i,b in enumerate(a.bars):
         if b.open_ms<old.START or b.open_ms>=old.END:continue
         day=b.open_ms//DAY*DAY
-        ref=daily_reference(a.frames['1d'],b.open_ms)
+        if day not in references:references[day]=daily_reference(a.frames['1d'],b.open_ms)
+        ref=references[day]
         if ref is None:availability['missing_20D_reference_hours']+=1;continue
         availability['available_20D_reference_hours']+=1
         edges=[]
@@ -74,7 +77,7 @@ def generate(a):
                 k=a.by_time.get(t)
                 if k is None or a.bars[k].v==0:reject('next_open_gap_or_zero');continue
                 e=a.bars[k].o
-                valid_location=e>=level if p['side']=='long' and policy=='T20_CONT' or p['side']=='long' and policy=='T20_FAIL' else e<=level
+                valid_location=entry_location(p['side'],e,level)
                 # Both long arms must stay above their respective level; short mirror.
                 if not valid_location:reject('next_open_lost_confirmation');continue
                 atr=a.reg.atr[j-1] if j else None
