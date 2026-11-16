@@ -7,6 +7,10 @@ on:
       - "stop_loss_research.py"
       - "test_stop_loss_research.py"
       - "trade_diagnostics.py"
+      - "entry_execution_audit.py"
+      - "test_entry_execution_audit.py"
+      - "entry_quality_research.py"
+      - "test_entry_quality_research.py"
       - "test_trade_diagnostics.py"
       - "pattern_research.py"
       - "test_pattern_research.py"
@@ -29,7 +33,7 @@ concurrency:
 
 jobs:
   comparison:
-    name: Compare stops, diagnose trades, observe causal patterns
+    name: Compare stops, diagnose trades, study OB entry quality
     runs-on: ubuntu-latest
     timeout-minutes: 360
     steps:
@@ -55,6 +59,10 @@ jobs:
         run: python -u trade_diagnostics.py
       - name: Observe causal Elliott/harmonic candidates and MFE uncertainty
         run: python -u pattern_trade_study.py --data-dir data/historical --output-dir data/historical
+      - name: Audit OB touch-hour execution timing
+        run: python -u entry_execution_audit.py --data-dir data/historical --output-dir data/historical
+      - name: Research OB entry confirmation and signal-time quality
+        run: python -u entry_quality_research.py --data-dir data/historical --output-dir data/historical
       - name: Publish diagnostic summary
         if: always()
         run: |
@@ -64,6 +72,8 @@ jobs:
           root = Path("data/historical")
           path = root / "BTCUSDT_trade_diagnostics.json"
           pattern_path = root / "BTCUSDT_pattern_trade_study.json"
+          execution_path = root / "BTCUSDT_entry_execution_audit.json"
+          quality_path = root / "BTCUSDT_entry_quality_research.json"
           summary = os.environ.get("GITHUB_STEP_SUMMARY")
           lines = ["# BTCUSDT trade diagnostics and pattern-as-of research", ""]
           if path.exists():
@@ -87,6 +97,25 @@ jobs:
               lines += ["", "Pattern labels are observational only, with a fixed 168h recency window and signal-time causal confirmation. No entry or exit logic changed."]
           else:
               lines += ["", "Pattern observation report was not produced; inspect earlier steps."]
+          if execution_path.exists():
+              execution = json.loads(execution_path.read_text(encoding="utf-8"))
+              base = execution["variants"].get("ob_1h_baseline", {}).get("test", {}).get("all", {})
+              lines += ["", "## OB retest execution timing audit", "",
+                        f"- Test original baseline: {base.get('trades')} trades; {base.get('one_bar_stops')} one-hour stops; {base.get('stop_within_two_held_bars')} within two holding bars.",
+                        "- Entry timestamp is an hourly-open proxy for a wick touch, not observed intrabar fill time."]
+          else:
+              lines += ["", "Entry timing audit not produced; inspect earlier steps."]
+          if quality_path.exists():
+              quality = json.loads(quality_path.read_text(encoding="utf-8"))
+              lines += ["", "## ENTRY-QUALITY-01 matched cohort (NOT full strategy backtest)", "",
+                        "| Split | Original trades | Confirmed next-open trades | Stronger prior-high/low confirm trades |",
+                        "|---|---:|---:|---:|"]
+              for split, item in quality["splits"].items():
+                  paired = item["paired_counterfactuals"]
+                  lines.append(f"| {split} | {item['baseline']['trades']} | {paired['rejection_close']['counterfactual_matched']['trades']} | {paired['rejection_above_prior_extreme']['counterfactual_matched']['trades']} |")
+              lines += ["", "All results are observational research. Do not claim a win-rate improvement or apply filters without a new independent test."]
+          else:
+              lines += ["", "ENTRY-QUALITY-01 report not produced; inspect earlier steps."]
           text = "\n".join(lines) + "\n"
           print(text)
           if summary:
@@ -110,5 +139,9 @@ jobs:
             data/historical/BTCUSDT_1h_pattern_candidates.csv
             data/historical/BTCUSDT_4h_pattern_candidates.csv
             data/historical/BTCUSDT_1d_pattern_candidates.csv
+            data/historical/BTCUSDT_entry_execution_audit.json
+            data/historical/BTCUSDT_entry_execution_audit.csv
+            data/historical/BTCUSDT_entry_quality_research.json
+            data/historical/BTCUSDT_entry_quality_features.csv
           if-no-files-found: warn
           retention-days: 30

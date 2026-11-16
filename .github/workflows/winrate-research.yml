@@ -50,7 +50,7 @@ jobs:
       - name: Diagnose every baseline trade
         if: always()
         run: >-
-          python -u trade_diagnostics.py BTCUSDT
+          python -u trade_diagnostics.py
           --data-dir data/historical
 
       - name: Publish a readable run summary
