@@ -71,4 +71,4 @@
 
 `python -m unittest test_p1_07_ai_audit -v`；`python p1_07_ai_audit.py --source-zip P1-06B.zip --out-dir NEW_EMPTY_FOLDER`。
 
-輸出：`ai_opportunity_audit.csv`完整4583機會、`ai_split_census.csv`、`ai_complete_case_features.csv`、`meta_predictions.csv`全部525預測、`meta_model.json`、`meta_classification.csv`、`AI_FEASIBILITY_RESULT_ZH.md`與`ai_audit_manifest.json`。所有主要輸出及程式有SHA256；17項測試涵蓋母體、重複label、未來特徵、未知品質、purging、Train-only預處理與未知label仍預測。
+輸出：`ai_opportunity_audit.csv`完整4583機會、`ai_split_census.csv`、`ai_complete_case_features.csv`、`meta_predictions.csv`全部525預測、`meta_model.json`、`meta_classification.csv`、`AI_FEASIBILITY_RESULT_ZH.md`與`ai_audit_manifest.json`。所有主要輸出及程式有SHA256；18項測試涵蓋母體、重複label、未來特徵、未知品質、purging、Train-only預處理與未知label仍預測。
