@@ -117,6 +117,8 @@ def analyze(row,bars,horizon_hours=None,tape=False,cutoff=money.END):
         complete=complete,right_censored=censored,missing_bars=missing,zero_volume_bars=zero,
         early_exit_capped=not tape and horizon_hours is not None and exit_time<requested,
         contains_post_exit_prices=tape and (end>exit_time or row['exit_reason'] in INTRABAR_EXITS and end>exit_bar),
+        envelope_may_include_unheld_extremes=not market or exit_uncertain or tape and (end>exit_time or row['exit_reason'] in INTRABAR_EXITS and end>exit_bar),
+        conditional_on_archived_fill_assumptions=True,
         entry_bar_uncertain=not market,exit_bar_uncertain=exit_uncertain,entry_clock_proxy=not market,
         R0_price=r0,R_model_per_unit=risk,mfe_R0_lower=mfe_lo/r0,mfe_R0_upper=mfe_hi/r0 if mfe_hi is not None else None,
         mae_R0_lower=mae_lo/r0,mae_R0_upper=mae_hi/r0 if mae_hi is not None else None,

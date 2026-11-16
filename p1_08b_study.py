@@ -63,6 +63,10 @@ def summarize(labels):
         n_early_exit=sum(r['early_exit_capped'] for r in labels),n_post_exit_tape=sum(r['contains_post_exit_prices'] for r in labels),
         n_entry_clock_proxy=sum(r['entry_bar_uncertain'] for r in labels),n_exit_bar_unknown=sum(r['exit_bar_uncertain'] for r in labels),
         n_right_censored=sum(r['right_censored'] for r in labels),
+        n_TP_SL_same_bar_unknown=sum(r['TP_SL_order']=='same_bar_unknown' for r in labels),
+        n_TP_SL_entry_or_data_unknown=sum(r['TP_SL_order'] in ('entry_bar_unknown','data_unknown') for r in labels),
+        n_peak_same_bar_unknown=sum(r['peak_order']=='same_bar_unknown' for r in labels),
+        n_peak_entry_exit_or_data_unknown=sum(r['peak_order'] in ('entry_or_exit_bar_unknown','data_unknown') for r in labels),
         definitely_cost_insufficient=sum(r['net_quote_potential_R_model_upper']<=0 for r in valid),
         definitely_cost_covered=sum(r['net_quote_potential_R_model_lower']>0 for r in valid),
         favorable_but_cost_insufficient=sum(r['mfe_R0_lower']>0 and r['net_quote_potential_R_model_upper']<=0 for r in valid))
@@ -122,6 +126,7 @@ def catalog():
                     'prebreak_ATR_pct','flat_cost5_over_ATR_pre','flat_cost15_over_ATR_pre')]+[
         dict(feature='entry_bar_final_body_and_RVOL',role='deferred_not_populated',availability='entry_time+1H',note='Cannot authorize that same open'),
         dict(feature='future_pivot',role='deferred_not_populated',availability='right confirmation candles closed',note='No hindsight pivot'),
+        dict(feature='known_entry_cost_share',role='known_at_eligible_entry_quote',availability='actual archived entry quote and known SL',note='Not known at original registration; no future exit used'),
         dict(feature='MFE_MAE_arrivals_giveback_exit_PnL',role='posthoc_label_only',availability='after relevant future window or original exit',note='Separate files; never feature')]
 
 
@@ -171,6 +176,7 @@ def _run(source_zip,out):
                         profile=('isolated','conditional_paper_'+row['side'],period,row['scenario'],row['policy']);profiles.setdefault(profile,set()).add(pid)
                 mappings.append(dict(path_id=pid,population=population,model=row.get('model','conditional_paper_'+row['side']),period=row.get('period','source_event'),
                     policy=row['policy'],scenario=row['scenario'],event_id=row['event_id'],symbol=row['symbol'],side=row['side'],entry_time_ms=row['entry_time_ms'],
+                    exit_time_ms=row['exit_time_ms'],exit_bar_ms=row['exit_bar_ms'],exit_reason=row['exit_reason'],
                     quantity=row['quantity'],planned_risk=row['planned_risk'],archived_net_R=row['r_multiple'],archived_net_pnl_USDT=row['net_pnl_usdt']))
         files.write_csv(out/'source_accounts.csv',accounts);files.write_csv(out/'profile_path_mapping.csv',mappings)
         files.write_csv(out/'feature_catalog.csv',catalog())
@@ -207,7 +213,8 @@ def _run(source_zip,out):
                     full['source_gross_R_model']=(D(row['raw_exit'])-D(row['raw_entry']))*(1 if row['side']=='long' else -1)/full['R_model_per_unit']
                     full['realized_cost_R_model']=full['source_gross_R_model']-full['source_net_R']
                     full['price_giveback_R_model_lower']=full['mfe_R_model_lower']-full['source_gross_R_model']
-                    meta=dict(path_id=pid,policy=row['policy'],event_id=row['event_id'],symbol=symbol,side=row['side'],scenario=row['scenario'],entry_time_ms=row['entry_time_ms'],exit_reason=row['exit_reason'])
+                    meta=dict(path_id=pid,policy=row['policy'],event_id=row['event_id'],symbol=symbol,side=row['side'],scenario=row['scenario'],entry_time_ms=row['entry_time_ms'],
+                        exit_time_ms=row['exit_time_ms'],exit_bar_ms=row['exit_bar_ms'],exit_reason=row['exit_reason'])
                     hold_table.write(dict(**meta,**full))
                     for hit in arrivals:touch_table.write(dict(path_id=pid,scope='full_original_hold',**hit))
                     cache[pid]=dict(full=full,horizons={})
@@ -267,7 +274,7 @@ def _run(source_zip,out):
             independent_strategy_evidence=False,positive_expectancy_claim=False,new_OOS=False,maximum_candidates=2,
             rejection_is_not_proof_all_features_useless=True))
         report(out,source,seeds,timeout,contrasts,candidates)
-        plot(out,timeout)
+        plot(out,timeout,cache)
         result=dict(version='p1-08b-price-paths-v1',current_commit=os.getenv('GITHUB_SHA'),base_commit=BASE,source_zip_sha256=SOURCE_SHA,protocol_sha256=PROTOCOL_SHA,
             source_output_hashes_verified=len(source['output_sha256']),source_accounts=160,source_actual_rows=len(actual),source_isolated_rows=len(isolated),
             source_opportunity_snapshots=len(snapshots),unique_paths=len(seeds),profile_mappings=len(mappings),profile_count=len(profiles),
@@ -370,7 +377,7 @@ def report(out,source,seeds,timeout,contrasts,candidates):
     (out/'P1_08B_RESULT_ZH.md').write_text('\n'.join(lines),encoding='utf-8')
 
 
-def plot(out,timeout):
+def plot(out,timeout,cache):
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
@@ -382,6 +389,16 @@ def plot(out,timeout):
     ax.axhline(0,color='grey',linewidth=.8);ax.set_xlabel('Posthoc held MFE / original price risk R0');ax.set_ylabel('Original72h endpoint gross / R0')
     ax.set_title('Opened Test: original T20_CONT timeouts; peaks are not executable exits');ax.legend(fontsize=8)
     fig.tight_layout();fig.savefig(out/'t20_cont_timeout_mfe_giveback.png',dpi=160);plt.close(fig)
+    fig,ax=plt.subplots(figsize=(8,5))
+    for key,title,color in [('mfe_R0_lower','MFE','#2878b5'),('mae_R0_lower','MAE','#c25c58')]:
+        values=[[float(cache[r['path_id']]['horizons'][('held',h)][key]) for r in rows] for h in paths.HORIZONS]
+        means=[sum(v)/len(v) if v else 0 for v in values]
+        low=[stats.percentile(v,.25) for v in values];high=[stats.percentile(v,.75) for v in values]
+        ax.plot(paths.HORIZONS,means,marker='o',label=title+' mean',color=color)
+        ax.fill_between(paths.HORIZONS,low,high,alpha=.12,color=color,label=title+' event IQR')
+    ax.set_xlabel('Fixed elapsed hours from recorded entry');ax.set_ylabel('Gross price move / original price risk R0')
+    ax.set_xticks(paths.HORIZONS);ax.set_title('Original28 Test timeouts: posthoc excursions, not executable returns')
+    ax.legend(fontsize=8);fig.tight_layout();fig.savefig(out/'t20_cont_timeout_horizons.png',dpi=160);plt.close(fig)
 
 
 if __name__=='__main__':
