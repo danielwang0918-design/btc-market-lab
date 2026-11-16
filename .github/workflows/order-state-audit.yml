@@ -1,0 +1,103 @@
+name: P0 OB pending-order state audit (1H+ decisions only)
+
+on:
+  push:
+    branches: ["codex/**"]
+    paths:
+      - "order_state_audit.py"
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: "Frozen multi-asset baseline run to audit (must contain all three assets)"
+        default: "43820018876"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: p0-order-state-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  replay:
+    name: Reproduce 1H order lifecycle ${{ matrix.symbol }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        symbol: [BTCUSDT, ETHUSDT, SOLUSDT]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Unit tests (no exchange connection or subhour signal)
+        run: python -m unittest -v
+      - name: Download frozen historical evidence from completed baseline run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.inputs.source_run_id || '43820018876' }}
+          SYMBOL: ${{ matrix.symbol }}
+        run: |
+          set -euo pipefail
+          case "$RUN_ID" in *[!0-9]*|'') echo 'Numeric source run required' >&2; exit 1;; esac
+          mkdir -p data/multi_asset research/order_state_01/source
+          gh run download "$RUN_ID" -R "$GITHUB_REPOSITORY" -n "multi-asset-input-$RUN_ID" -D data/multi_asset
+          gh run download "$RUN_ID" -R "$GITHUB_REPOSITORY" -n "multi-asset-baseline-$RUN_ID-$SYMBOL" -D research/order_state_01/source
+      - name: Replay every 1H pending-state transition and fail if trades differ
+        run: >-
+          python -u order_state_audit.py "${{ matrix.symbol }}"
+          --data-dir data/multi_asset
+          --baseline-dir research/order_state_01/source
+          --output-dir research/order_state_01/per_symbol
+      - name: Upload audit with complete transitions
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: order-state-01-${{ github.run_id }}-${{ matrix.symbol }}
+          path: research/order_state_01/per_symbol/*
+          retention-days: 30
+          if-no-files-found: warn
+
+  aggregate:
+    needs: [replay]
+    if: ${{ always() }}
+    name: Publish all verified order-state transitions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: order-state-01-${{ github.run_id }}-*
+          path: research/order_state_01/per_symbol
+          merge-multiple: true
+      - name: Require exact BTC ETH SOL audit reports and summarize
+        run: >-
+          python -u order_state_audit.py aggregate
+          --data-dir research/order_state_01/per_symbol
+          --output-dir research/order_state_01/summary
+      - name: Publish readable audit
+        if: always()
+        run: |
+          if [ -f research/order_state_01/summary/order_state_test_summary.md ]; then
+            cat research/order_state_01/summary/order_state_test_summary.md
+            cat research/order_state_01/summary/order_state_test_summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'Incomplete P0 audit: must not report model changes or win-rate improvements.'
+          fi
+      - name: Upload verified summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: order-state-01-verified-summary-${{ github.run_id }}
+          path: research/order_state_01/summary/*
+          retention-days: 30
+          if-no-files-found: warn

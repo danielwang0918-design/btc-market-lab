@@ -1,0 +1,110 @@
+name: P0 OB changed-signal cancellation causes (1H+ only)
+
+on:
+  push:
+    branches: ["codex/**"]
+    paths:
+      - "order_state_cause_audit.py"
+  workflow_dispatch:
+    inputs:
+      baseline_run:
+        description: "Frozen 10-symbol multi-asset baseline run"
+        default: "43820018876"
+        type: string
+      replay_run:
+        description: "Completed 1H-only order-state replay run"
+        default: "43827207508"
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: p0-order-state-cause-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  reasons:
+    name: Rebuild closed 1H+ reasons ${{ matrix.symbol }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        symbol: [BTCUSDT, ETHUSDT, SOLUSDT]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Verify research-only unit tests
+        run: python -m unittest -v
+      - name: Load only pre-frozen 1D/4H/1H and 1H order-state artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_RUN: ${{ github.event.inputs.baseline_run || '43820018876' }}
+          REPLAY_RUN: ${{ github.event.inputs.replay_run || '43827207508' }}
+          SYMBOL: ${{ matrix.symbol }}
+        run: |
+          set -euo pipefail
+          case "$BASE_RUN" in *[!0-9]*|'') exit 1;; esac
+          case "$REPLAY_RUN" in *[!0-9]*|'') exit 1;; esac
+          mkdir -p data/multi_asset research/order_state_03/replay research/order_state_03/baseline
+          gh run download "$BASE_RUN" -R "$GITHUB_REPOSITORY" -n "multi-asset-input-$BASE_RUN" -D data/multi_asset
+          gh run download "$BASE_RUN" -R "$GITHUB_REPOSITORY" -n "multi-asset-baseline-$BASE_RUN-$SYMBOL" -D research/order_state_03/baseline
+          gh run download "$REPLAY_RUN" -R "$GITHUB_REPOSITORY" -n "order-state-01-$REPLAY_RUN-$SYMBOL" -D research/order_state_03/replay
+      - name: Reconstruct original candidate and first-failed condition only at 1H close
+        run: >-
+          python -u order_state_cause_audit.py causes "${{ matrix.symbol }}"
+          --data-dir data/multi_asset
+          --replay-dir research/order_state_03/replay
+          --baseline-dir research/order_state_03/baseline
+          --output-dir research/order_state_03/results
+      - name: Upload causal as-of diagnostics, not model-changed trades
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: order-state-03-${{ github.run_id }}-${{ matrix.symbol }}
+          path: research/order_state_03/results/*_cancellation_causes.*
+          if-no-files-found: warn
+          retention-days: 30
+
+  summary:
+    needs: [reasons]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    name: Verify all cancellation reasons and publish observational totals
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Download every symbol's closed-candle reasons
+        uses: actions/download-artifact@v4
+        with:
+          pattern: order-state-03-${{ github.run_id }}-*
+          path: research/order_state_03/results
+          merge-multiple: true
+      - name: Require all three independent proof files
+        run: >-
+          python -u order_state_cause_audit.py aggregate
+          --output-dir research/order_state_03/results
+      - name: Publish report
+        if: always()
+        run: |
+          if [ -f research/order_state_03/results/cancel_cause_summary.md ]; then
+            cat research/order_state_03/results/cancel_cause_summary.md
+            cat research/order_state_03/results/cancel_cause_summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'Incomplete cancellation as-of replay. Do NOT infer reasons from missing artifacts.'
+          fi
+      - name: Upload verified causal snapshot observations
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: order-state-03-verified-${{ github.run_id }}
+          path: research/order_state_03/results/*
+          if-no-files-found: warn
+          retention-days: 30

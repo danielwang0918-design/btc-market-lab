@@ -1,0 +1,102 @@
+name: P0 OB distance before 1H BOS reversal (1H+ evidence only)
+
+on:
+  push:
+    branches: ["codex/**"]
+    paths:
+      - "order_state_ob_distance.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: p0-ob-distance-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  per-symbol:
+    name: Audited OB distance ${{ matrix.symbol }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        symbol: [BTCUSDT, ETHUSDT, SOLUSDT]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Unit tests and fixed 1H+ research scope
+        run: python -m unittest -v
+      - name: Retrieve frozen Binance 1d 4h 1h and prior verified order-state reports
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SYMBOL: ${{ matrix.symbol }}
+        run: |
+          set -euo pipefail
+          mkdir -p data/multi_asset research/order_state_05/stage03 research/order_state_05/stage04 research/order_state_05/replay
+          gh run download 43820018876 -R "$GITHUB_REPOSITORY" -n multi-asset-input-43820018876 -D data/multi_asset
+          gh run download 43827207508 -R "$GITHUB_REPOSITORY" -n "order-state-01-43827207508-$SYMBOL" -D research/order_state_05/replay
+          gh run download 43831710147 -R "$GITHUB_REPOSITORY" -n order-state-03-verified-43831710147 -D research/order_state_05/stage03
+          gh run download 43836895973 -R "$GITHUB_REPOSITORY" -n order-state-04-verified-43836895973 -D research/order_state_05/stage04
+      - name: Reconcile 1H OB candle, prior close and cancellation close with frozen SHA256
+        run: >-
+          python -u order_state_ob_distance.py symbol "${{ matrix.symbol }}"
+          --data-dir data/multi_asset
+          --stage03 research/order_state_05/stage03
+          --stage04 research/order_state_05/stage04
+          --replay-dir research/order_state_05/replay
+          --output-dir research/order_state_05/individual
+      - name: Publish individual frozen event evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: order-state-05-${{ github.run_id }}-${{ matrix.symbol }}
+          path: research/order_state_05/individual/*_ob_distance_*
+          if-no-files-found: warn
+          retention-days: 30
+
+  aggregate:
+    name: Verify 94 reverse BOS and 42 other cancellations
+    needs: [per-symbol]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Download all per-symbol evidence
+        uses: actions/download-artifact@v4
+        with:
+          pattern: order-state-05-${{ github.run_id }}-*
+          path: research/order_state_05/individual
+          merge-multiple: true
+      - name: Fail closed on any missing or altered evidence
+        run: >-
+          python -u order_state_ob_distance.py aggregate
+          --input-dir research/order_state_05/individual
+          --output-dir research/order_state_05/summary
+      - name: Publish readable report
+        if: always()
+        run: |
+          if [ -f research/order_state_05/summary/ob_distance_05_aggregate.md ]; then
+            cat research/order_state_05/summary/ob_distance_05_aggregate.md
+            cat research/order_state_05/summary/ob_distance_05_aggregate.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'P0 OB distance report unavailable or incomplete. Do not claim verification.'
+          fi
+      - name: Upload cross-symbol evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: order-state-05-verified-${{ github.run_id }}
+          path: |
+            research/order_state_05/summary/*
+            research/order_state_05/individual/*
+          if-no-files-found: warn
+          retention-days: 30

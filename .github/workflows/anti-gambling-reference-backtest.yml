@@ -1,0 +1,123 @@
+name: Anti-Gambling Trader SMA example backtest
+
+on:
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "anti_gambling_reference_backtest.py"
+      - "test_anti_gambling_reference_backtest.py"
+      - "historical_backtest.py"
+      - "market_structure.py"
+      - "binance_market_data.py"
+      - ".github/workflows/anti-gambling-reference-backtest.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: anti-gambling-reference-backtest-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  benchmark:
+    name: Download BTC daily candles and test 5/20 SMA example
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Run unit tests
+        run: python -m unittest -v
+
+      - name: Download Binance Spot daily history
+        run: python -u historical_backtest.py download BTCUSDT --interval 1d
+
+      - name: Backtest Anti-Gambling Trader 5/20 SMA example
+        run: >-
+          python -u anti_gambling_reference_backtest.py BTCUSDT
+          --fast-period 5
+          --slow-period 20
+          --stop-loss-percent 5
+          --take-profit-percent 15
+          --allocation-percent 20
+          --fee-bps-per-side 10
+          --slippage-bps-per-side 5
+
+      - name: Publish reproducible summary
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          report_path = Path("data/historical/BTCUSDT_anti_gambling_5_20_sma_backtest.json")
+          summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+          if not report_path.exists():
+              message = "The SMA example backtest report was not produced. Inspect the failed step."
+              print(message)
+              if summary_path:
+                  with open(summary_path, "a", encoding="utf-8") as stream:
+                      stream.write("# Anti-Gambling Trader SMA example backtest\n\n" + message + "\n")
+              raise SystemExit(0)
+
+          report = json.loads(report_path.read_text(encoding="utf-8"))
+          lines = [
+              "# Anti-Gambling Trader: 5/20 SMA example on BTCUSDT Spot",
+              "",
+              f'- Data: {report["data"]["closed_candles"]:,} closed daily candles, {report["data"]["start_utc"]} to {report["data"]["end_utc"]}',
+              f'- Parameters: SMA({report["source_parameters"]["fast_sma_days"]}) > SMA({report["source_parameters"]["slow_sma_days"]}); close-confirmed stop {report["source_parameters"]["stop_loss_percent"]}%; close-confirmed target {report["source_parameters"]["take_profit_percent"]}%; allocation {report["source_parameters"]["max_position_pct_of_equity"]}%.',
+              f'- Costs: {report["source_parameters"]["paper_fee_rate_per_side_percent"]}% fee + {report["source_parameters"]["paper_slippage_per_side_percent"]}% slippage per side.',
+              "- Signal at a closed daily candle; enter or exit at the next daily open. Fixed parameters, no optimization; the test split does not choose or tune parameters.",
+              "",
+              "## Results",
+              "",
+              "| Split | Trades | Wins | Losses | Win rate (%) | Expectancy/trade (%) of allocated capital | Profit factor | Portfolio compounded return (%) | Max drawdown (%) | Avg. days held |",
+              "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+          ]
+          for split in ("train", "validation", "test"):
+              m = report["splits"][split]["metrics"]
+              lines.append(
+                  f'| {split} | {m["trade_count"]} | {m["wins"]} | {m["losses"]} | {m["win_rate_percent"]} | '
+                  f'{m["expectancy_percent_on_exposed_capital"]} | {m["profit_factor"]} | '
+                  f'{m["compounded_portfolio_return_percent"]} | {m["max_drawdown_percent"]} | {m["average_days_held"]} |'
+              )
+          lines += [
+              "",
+              "## Source and interpretation",
+              "",
+              f'- [Source project]({report["source_project"]})',
+              f'- [Example implementation and default risk settings]({report["source_strategy_file"]})',
+              "",
+              "The source repository is primarily a trade-record analyzer and strategy-code scaffold. Its Strategy.on_bar leaves the entry logic as TODO and only shows the 5/20 SMA condition as an example; this test makes that example explicit and reproducible rather than claiming the source publishes a complete strategy.",
+              "",
+              "The source checks the latest close against the 5% / 15% exit thresholds, so this reproduction exits at the following daily open after a close-confirmed threshold. Because it does not model exchange-native intrabar stop orders, realized loss can exceed 5%, especially on gaps.",
+              "",
+              "This result is a historical benchmark, not investment advice. Win rate alone is insufficient; positive expectancy, profit factor, drawdown, sample size, and performance on a genuinely untouched future window matter too.",
+              "",
+              f'- Daily candle gap count in downloaded history: {report["data"]["gap_count"]}',
+          ]
+          content = "\n".join(lines) + "\n"
+          print(content)
+          if summary_path:
+              with open(summary_path, "a", encoding="utf-8") as stream:
+                  stream.write(content)
+          PY
+
+      - name: Upload full daily history and report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: BTCUSDT-anti-gambling-SMA-example-${{ github.run_id }}
+          path: |
+            data/historical/BTCUSDT_1d.csv
+            data/historical/BTCUSDT_anti_gambling_5_20_sma_backtest.json
+          if-no-files-found: warn
+          retention-days: 30

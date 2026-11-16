@@ -26,6 +26,7 @@ from market_structure import (
 )
 
 SPOT_BASE = "https://api.binance.com"
+SPOT_PUBLIC_DATA_BASE = "https://data-api.binance.vision"
 FUTURES_BASE = "https://fapi.binance.com"
 SOURCE_SPOT = "Binance Spot REST API"
 SOURCE_FUTURES = "Binance USDⓈ-M Futures REST API"

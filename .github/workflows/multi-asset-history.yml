@@ -1,0 +1,101 @@
+name: Binance multi-asset historical coverage
+
+on:
+  # Run heavy jobs only for relevant commits; PR cumulative diffs caused repeated cancellations.
+  push:
+    branches: ["main", "codex/**"]
+    paths:
+      - "multi_asset_history.py"
+      - "binance_market_data.py"
+      - "historical_backtest.py"
+  workflow_dispatch:
+    inputs:
+      symbols:
+        description: "Optional explicit comma-separated Binance Spot USDT symbols; empty uses current top-volume list"
+        required: false
+        type: string
+      top_n:
+        description: "Top N spot USDT pairs by current 24h quote volume when symbols is empty (1-50)"
+        required: false
+        default: "10"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: multi-asset-history-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  download-and-audit:
+    name: Select universe, download history, audit gaps
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - name: Check out research branch
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Run offline unit tests
+        run: python -m unittest -v
+
+      - name: Download Binance Spot USDT universe and 1d/4h/1h closed K-lines
+        env:
+          REQUESTED_SYMBOLS: ${{ github.event.inputs.symbols || '' }}
+          TOP_N: ${{ github.event.inputs.top_n || '10' }}
+        run: |
+          if [ -n "$REQUESTED_SYMBOLS" ]; then
+            python -u multi_asset_history.py --symbols "$REQUESTED_SYMBOLS" --data-dir data/multi_asset
+          else
+            python -u multi_asset_history.py --top-volume "$TOP_N" --data-dir data/multi_asset
+          fi
+
+      - name: Publish coverage and bias summary
+        if: always()
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          p=Path('data/multi_asset/multi_asset_coverage.json')
+          lines=['# Binance multi-asset history coverage', '']
+          if not p.exists():
+              lines.append('Coverage file missing: inspect earlier job steps.')
+          else:
+              d=json.loads(p.read_text(encoding='utf-8'))
+              u=d['universe']
+              lines += [f"- Universe snapshot: {u.get('selected_at_utc')}",
+                        f"- Selection: {u.get('selection_mode')}",
+                        f"- Data download: {d.get('status')}",
+                        '', '| Symbol | 1D | 4H | 1H | 1H gaps | Status |',
+                        '|---|---:|---:|---:|---:|---|']
+              for symbol,info in d['symbols'].items():
+                  i=info.get('intervals',{})
+                  value=lambda k,f: i.get(k,{}).get(f, 'error')
+                  lines.append(f"| {symbol} | {value('1d','bars')} | {value('4h','bars')} | {value('1h','bars')} | {value('1h','missing_bars_in_observed_range')} | {info['status']} |")
+              lines += ['', '**Bias warning:** the current top-volume coin list was selected with information known today; it is NOT a historical point-in-time universe.',
+                        'Crypto assets are correlated. More symbol-trades do not automatically mean more independent statistical evidence.',
+                        'This workflow downloads and audits data only; it does NOT prove profitability or change formal trading rules.']
+          output='\n'.join(lines)+'\n'
+          print(output)
+          if os.environ.get('GITHUB_STEP_SUMMARY'):
+              with open(os.environ['GITHUB_STEP_SUMMARY'],'a',encoding='utf-8') as out:out.write(output)
+          PY
+
+      - name: Upload frozen universe, coverage, and historical K-lines
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: binance-multi-asset-history-${{ github.run_id }}
+          path: |
+            data/multi_asset/universe_selection.json
+            data/multi_asset/multi_asset_coverage.json
+            data/multi_asset/*_1d.csv
+            data/multi_asset/*_4h.csv
+            data/multi_asset/*_1h.csv
+          if-no-files-found: warn
+          retention-days: 14

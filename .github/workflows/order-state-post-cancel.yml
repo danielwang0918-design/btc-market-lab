@@ -1,0 +1,134 @@
+name: P0 canceled OB forward observations (1H+ only)
+
+on:
+  push:
+    branches: ["codex/**"]
+    paths:
+      - "order_state_post_cancel.py"
+  workflow_dispatch:
+    inputs:
+      baseline_run:
+        description: "Frozen multi-asset historical run"
+        required: false
+        default: "43820018876"
+        type: string
+      cause_run:
+        description: "Original cancellation causes run"
+        required: false
+        default: "43831710147"
+        type: string
+      bos_run:
+        description: "Original 1H BOS timeline run"
+        required: false
+        default: "43836895973"
+        type: string
+      distance_run:
+        description: "Original OB distance evidence run"
+        required: false
+        default: "43838687913"
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: p0-ob-post-cancel-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  by_asset:
+    name: Verify frozen original OB follow-up ${{ matrix.symbol }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        symbol: [BTCUSDT, ETHUSDT, SOLUSDT]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Offline full suite (trading model unchanged)
+        run: python -m unittest -v
+      - name: Download ONLY frozen GitHub evidence; no Binance requests
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE: ${{ github.event.inputs.baseline_run || '43820018876' }}
+          CAUSE: ${{ github.event.inputs.cause_run || '43831710147' }}
+          BOS: ${{ github.event.inputs.bos_run || '43836895973' }}
+          DISTANCE: ${{ github.event.inputs.distance_run || '43838687913' }}
+        run: |
+          set -euo pipefail
+          for VALUE in "$BASE" "$CAUSE" "$BOS" "$DISTANCE"; do
+            case "$VALUE" in *[!0-9]*|'') echo "Run identifiers must be numeric" >&2; exit 1;; esac
+          done
+          mkdir -p evidence/history evidence/03 evidence/04 evidence/05/temp evidence/05
+          gh run download "$BASE" -R "$GITHUB_REPOSITORY" -n "multi-asset-input-$BASE" -D evidence/history
+          gh run download "$CAUSE" -R "$GITHUB_REPOSITORY" -n "order-state-03-verified-$CAUSE" -D evidence/03
+          gh run download "$BOS" -R "$GITHUB_REPOSITORY" -n "order-state-04-verified-$BOS" -D evidence/04
+          gh run download "$DISTANCE" -R "$GITHUB_REPOSITORY" -n "order-state-05-verified-$DISTANCE" -D evidence/05/temp
+          test -f evidence/05/temp/summary/ob_distance_05_aggregate.json
+          cp evidence/05/temp/summary/ob_distance_05_aggregate.json evidence/05/
+          cp evidence/05/temp/individual/*_ob_distance_records.csv evidence/05/
+          cp evidence/05/temp/individual/*_ob_distance_summary.json evidence/05/
+      - name: Match all prior SHAs, verify 1H reverse BOS and observe post-cancel windows
+        run: >-
+          python -u order_state_post_cancel.py symbol "${{ matrix.symbol }}"
+          --history evidence/history --stage03 evidence/03
+          --stage04 evidence/04 --stage05 evidence/05
+          --out research/order_state_06/per_symbol
+      - name: Preserve per-asset result; never invent missing outcomes
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: order-state-06-${{ github.run_id }}-${{ matrix.symbol }}
+          path: research/order_state_06/per_symbol/*_post_cancel_records.json
+          if-no-files-found: warn
+          retention-days: 30
+
+  summarize:
+    name: Combine all 136 verified canceled setups (94 reverse-BOS + 42 other)
+    needs: [by_asset]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Download individual evidence (missing any one symbol FAILS)
+        uses: actions/download-artifact@v4
+        with:
+          pattern: order-state-06-${{ github.run_id }}-*
+          path: research/order_state_06/per_symbol
+          merge-multiple: true
+      - name: Check 94 plus 42 cases, censoring and aggregate
+        run: >-
+          python -u order_state_post_cancel.py aggregate
+          --input research/order_state_06/per_symbol
+          --out research/order_state_06/summary
+      - name: Publish readable descriptive summary
+        if: always()
+        run: |
+          if [ -f research/order_state_06/summary/post_cancel_06_summary.md ]; then
+            cat research/order_state_06/summary/post_cancel_06_summary.md
+            cat research/order_state_06/summary/post_cancel_06_summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'Incomplete case evidence, do not infer profitability.'
+          fi
+      - name: Upload complete P0 observational ledger
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: order-state-06-verified-${{ github.run_id }}
+          path: |
+            research/order_state_06/per_symbol/*_post_cancel_records.json
+            research/order_state_06/summary/post_cancel_06_summary.json
+            research/order_state_06/summary/post_cancel_06_summary.md
+            research/order_state_06/summary/post_cancel_06_cases.csv
+          if-no-files-found: warn
+          retention-days: 30

@@ -1,0 +1,266 @@
+{
+  "protocol_version": "p0-forward-v1",
+  "status": "preregistered_research_only",
+  "protocol_creation_date_utc": "2026-11-16",
+  "forward_start_utc": "2026-11-17T00:00:00+00:00",
+  "forward_end_exclusive_utc": "2028-01-01T00:00:00+00:00",
+  "symbols": [
+    "BTCUSDT",
+    "ETHUSDT",
+    "SOLUSDT",
+    "ZECUSDT",
+    "XRPUSDT",
+    "BNBUSDT",
+    "NEARUSDT",
+    "DOGEUSDT"
+  ],
+  "excluded_symbols": [
+    "ASTERUSDT",
+    "NVDABUSDT"
+  ],
+  "universe_frozen_at_utc": "2026-11-16T06:55:21.332000+00:00",
+  "fixed_universe_rationale": "Frozen current-volume-selected universe as of 2026-11-16; no forward re-ranking or dropping losing assets. Hindsight bias affects historical research, not future held-after-selection observations.",
+  "baseline_run_id": 43820018876,
+  "baseline_aggregate_sha256": "7546fc9692be973784ccd27c35b79b745407b8ba37bf0e30d1672d4aa1544e2c",
+  "frozen_coverage_sha256": "90d12ef1bd55020ae0d543f304822b38bcb39980becf7536165edb5c5f00f83a",
+  "original_source_git_blob_sha1": {
+    "historical_backtest.py": "fa5aa27cbb70b008514144087a8387b58a82b41c",
+    "market_research.py": "438a362ecb8f89d05d6582d1e17ffb6dec67149e",
+    "market_structure.py": "621d309f495ffd851d30247e02010f41314ea0cd",
+    "binance_market_data.py": "22f786768c2ad046fd907621542700ef5ead0cfe",
+    "multi_asset_baseline.py": "ee442853a6fd7d0ef28d9b4f5f4cd640d47275c7"
+  },
+  "frozen_data_prefixes": {
+    "BTCUSDT_1d.csv": {
+      "sha256": "5dced7ebdf9078dc43092e29a35f24284015c88bfb9fb99e67472606204f2f8e",
+      "bytes": 835188,
+      "frozen_bars": 3378,
+      "interval": "1d",
+      "symbol": "BTCUSDT",
+      "frozen_last_close_exclusive_ms": 1794787200000
+    },
+    "BTCUSDT_4h.csv": {
+      "sha256": "77edd1d0f48fcb55127012fda99b89af225c94d5e4ef7d889c222444f1f715de",
+      "bytes": 4989903,
+      "frozen_bars": 20252,
+      "interval": "4h",
+      "symbol": "BTCUSDT",
+      "frozen_last_close_exclusive_ms": 1794801600000
+    },
+    "BTCUSDT_1h.csv": {
+      "sha256": "d6925000d2ae264eaa36c11fe3f02777c3e42fdd248b55bf39fd686137122016",
+      "bytes": 19896285,
+      "frozen_bars": 80946,
+      "interval": "1h",
+      "symbol": "BTCUSDT",
+      "frozen_last_close_exclusive_ms": 1794808800000
+    },
+    "ETHUSDT_1d.csv": {
+      "sha256": "36c6650e3946d05b2091a4fea37547e7541c28c881e4b5a9bd3da03d6ae9dc7d",
+      "bytes": 822876,
+      "frozen_bars": 3378,
+      "interval": "1d",
+      "symbol": "ETHUSDT",
+      "frozen_last_close_exclusive_ms": 1794787200000
+    },
+    "ETHUSDT_4h.csv": {
+      "sha256": "5e16d3c283a7e9f2322c8cb6d8da5eff9a1d1b9045620d9bf5ca32112a046cd0",
+      "bytes": 4916636,
+      "frozen_bars": 20252,
+      "interval": "4h",
+      "symbol": "ETHUSDT",
+      "frozen_last_close_exclusive_ms": 1794801600000
+    },
+    "ETHUSDT_1h.csv": {
+      "sha256": "3ccf0594ec46fb38a5b5bfb45caa65e9bafdc385617076661f199820c91420d0",
+      "bytes": 19601927,
+      "frozen_bars": 80946,
+      "interval": "1h",
+      "symbol": "ETHUSDT",
+      "frozen_last_close_exclusive_ms": 1794808800000
+    },
+    "SOLUSDT_1d.csv": {
+      "sha256": "d105cd7033d32e4fa26c35c224bc85fc21c4650bece6fb725842516befa87655",
+      "bytes": 547935,
+      "frozen_bars": 2288,
+      "interval": "1d",
+      "symbol": "SOLUSDT",
+      "frozen_last_close_exclusive_ms": 1794787200000
+    },
+    "SOLUSDT_4h.csv": {
+      "sha256": "9ce9fd1a055f8f9ce2c4f075d3fdbc9d7896cdb244932c0a53f28e7bcc460039",
+      "bytes": 3275180,
+      "frozen_bars": 13728,
+      "interval": "4h",
+      "symbol": "SOLUSDT",
+      "frozen_last_close_exclusive_ms": 1794801600000
+    },
+    "SOLUSDT_1h.csv": {
+      "sha256": "46376068eebbfdf544e22777bdffca625ce27869e8f1870a68e909521b1d0e2e",
+      "bytes": 13062548,
+      "frozen_bars": 54892,
+      "interval": "1h",
+      "symbol": "SOLUSDT",
+      "frozen_last_close_exclusive_ms": 1794808800000
+    },
+    "ZECUSDT_1d.csv": {
+      "sha256": "2723e4d46628e30505954b142f5bdba967da758ba4564fd54043d563b9da43a0",
+      "bytes": 665718,
+      "frozen_bars": 2797,
+      "interval": "1d",
+      "symbol": "ZECUSDT",
+      "frozen_last_close_exclusive_ms": 1794787200000
+    },
+    "ZECUSDT_4h.csv": {
+      "sha256": "1b0570e75396734d51a7d548457280199db63d9b0e5ef70269d5f31d1a8c3351",
+      "bytes": 3978624,
+      "frozen_bars": 16778,
+      "interval": "4h",
+      "symbol": "ZECUSDT",
+      "frozen_last_close_exclusive_ms": 1794801600000
+    },
+    "ZECUSDT_1h.csv": {
+      "sha256": "a1ba9bc0923ee72645c0cdfee4cddee56373f8381b87b70bc760bd67abd99000",
+      "bytes": 15860152,
+      "frozen_bars": 67076,
+      "interval": "1h",
+      "symbol": "ZECUSDT",
+      "frozen_last_close_exclusive_ms": 1794808800000
+    },
+    "XRPUSDT_1d.csv": {
+      "sha256": "53555fbfd31f97085d2fb5c5acd51a6f5dfd0a66afbb0248274488dc99de873c",
+      "bytes": 735375,
+      "frozen_bars": 3118,
+      "interval": "1d",
+      "symbol": "XRPUSDT",
+      "frozen_last_close_exclusive_ms": 1794787200000
+    },
+    "XRPUSDT_4h.csv": {
+      "sha256": "f4af1dc48cc804fdff1f74799d145cd50d806097d01a043b25ac8a3beb115ca7",
+      "bytes": 4393464,
+      "frozen_bars": 18698,
+      "interval": "4h",
+      "symbol": "XRPUSDT",
+      "frozen_last_close_exclusive_ms": 1794801600000
+    },
+    "XRPUSDT_1h.csv": {
+      "sha256": "4a50caf72b8f5bfdaafe08ea56b9b0abce611ab7c772169a51767aad539bc432",
+      "bytes": 17517489,
+      "frozen_bars": 74743,
+      "interval": "1h",
+      "symbol": "XRPUSDT",
+      "frozen_last_close_exclusive_ms": 1794812400000
+    },
+    "BNBUSDT_1d.csv": {
+      "sha256": "5dceab1df514152a56bba499404a50a83045fedbd8ea1226117e6860af0dfab9",
+      "bytes": 790422,
+      "frozen_bars": 3297,
+      "interval": "1d",
+      "symbol": "BNBUSDT",
+      "frozen_last_close_exclusive_ms": 1794787200000
+    },
+    "BNBUSDT_4h.csv": {
+      "sha256": "eada22ec3e4b8e759843ebae9d820f31db5008bc1b3879f0df346d6bd3453c01",
+      "bytes": 4721375,
+      "frozen_bars": 19767,
+      "interval": "4h",
+      "symbol": "BNBUSDT",
+      "frozen_last_close_exclusive_ms": 1794801600000
+    },
+    "BNBUSDT_1h.csv": {
+      "sha256": "62c430f13aa1942dc09a0d28f3db021aae4734b1b22f7e599563423d919c1224",
+      "bytes": 18820982,
+      "frozen_bars": 79010,
+      "interval": "1h",
+      "symbol": "BNBUSDT",
+      "frozen_last_close_exclusive_ms": 1794812400000
+    },
+    "NEARUSDT_1d.csv": {
+      "sha256": "25b1489ae35e99dd695cbaa20e6b478ae3549ee1313b58fd23f48db02d9df0d8",
+      "bytes": 524660,
+      "frozen_bars": 2224,
+      "interval": "1d",
+      "symbol": "NEARUSDT",
+      "frozen_last_close_exclusive_ms": 1794787200000
+    },
+    "NEARUSDT_4h.csv": {
+      "sha256": "90477979c361933811ce1cbedeed62fb021fd6120717677510b1034e665f1275",
+      "bytes": 3136506,
+      "frozen_bars": 13344,
+      "interval": "4h",
+      "symbol": "NEARUSDT",
+      "frozen_last_close_exclusive_ms": 1794801600000
+    },
+    "NEARUSDT_1h.csv": {
+      "sha256": "e98e51f45b78d7d665f5eb6fb1811093b618827bf8d2af382507caf4daf49d53",
+      "bytes": 12505442,
+      "frozen_bars": 53358,
+      "interval": "1h",
+      "symbol": "NEARUSDT",
+      "frozen_last_close_exclusive_ms": 1794812400000
+    },
+    "DOGEUSDT_1d.csv": {
+      "sha256": "0d61caad638f304d807e120fadddaacf4f43e9210d590f3d87c8e3fcb1ffc4bd",
+      "bytes": 638945,
+      "frozen_bars": 2691,
+      "interval": "1d",
+      "symbol": "DOGEUSDT",
+      "frozen_last_close_exclusive_ms": 1794787200000
+    },
+    "DOGEUSDT_4h.csv": {
+      "sha256": "1acf353b2d59f248574b3c99452e90e64cce1c6aa98a7358e8e853bb0ff3773f",
+      "bytes": 3819081,
+      "frozen_bars": 16142,
+      "interval": "4h",
+      "symbol": "DOGEUSDT",
+      "frozen_last_close_exclusive_ms": 1794801600000
+    },
+    "DOGEUSDT_1h.csv": {
+      "sha256": "64f665f7d67e76439557ef8ec8adfe7a74a822a5e50cda558c1c2f8771c7c6fa",
+      "bytes": 15226538,
+      "frozen_bars": 64535,
+      "interval": "1h",
+      "symbol": "DOGEUSDT",
+      "frozen_last_close_exclusive_ms": 1794812400000
+    }
+  },
+  "formal_engine": {
+    "strategy": "mtf-bos-ob-retest-v1",
+    "allowed_decision_timeframes": [
+      "1d",
+      "4h",
+      "1h"
+    ],
+    "min_net_rr": 1.5,
+    "max_setup_age_hours": 168,
+    "fee_bps_per_side": 10,
+    "slippage_bps_per_side": 5,
+    "stop_first_if_same_1h": true,
+    "no_open_position_or_pending_order_carry_from_pre_start": true,
+    "real_order_placement": false
+  },
+  "primary_endpoint": "mean net R of completed forward simulated trades (not portfolio return)",
+  "secondary_endpoints": [
+    "forward win percentage",
+    "profit factor",
+    "trade count per symbol",
+    "same-calendar-week correlation",
+    "cancelled OB signal classifications"
+  ],
+  "fixed_analysis": {
+    "no_interim_strategy_revisions": true,
+    "no_parameter_search_on_forward": true,
+    "report_by_symbol_even_if_zero_trades": true,
+    "omit_open_unclosed_positions_from_completed_metrics": true,
+    "min_trades_for_descriptive_readout": 200,
+    "min_distinct_entry_utc_weeks_for_descriptive_readout": 26,
+    "one_final_calendar_readout_at_end_utc": "2028-01-01T00:00:00+00:00"
+  },
+  "limitations": [
+    "Spot 1H wick-touch is a simulated fill proxy, not an executable order",
+    "Cross-symbol trades correlated; average R is not portfolio performance",
+    "Forward start and study end are calendar-locked; cannot call results untouched if code, universe or outcome labels change",
+    "No futures funding or liquidity model",
+    "Interim analyses do not create new independent holdouts"
+  ]
+}

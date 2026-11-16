@@ -1,0 +1,121 @@
+name: Public BTC strategy benchmarks
+
+on:
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "reference_strategy_benchmarks.py"
+      - "test_reference_strategy_benchmarks.py"
+      - "historical_backtest.py"
+      - "market_structure.py"
+      - "binance_market_data.py"
+      - ".github/workflows/reference-strategy-benchmarks.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: reference-strategy-benchmarks-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  benchmark:
+    name: Download BTC spot data and benchmark reference strategies
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Run unit tests
+        run: python -m unittest -v
+
+      - name: Download Binance Spot hourly history
+        run: python -u historical_backtest.py download BTCUSDT --interval 1h
+
+      - name: Benchmark public reference strategy rules
+        run: >-
+          python -u reference_strategy_benchmarks.py BTCUSDT
+          --fee-bps-per-side 10
+          --slippage-bps-per-side 5
+
+      - name: Publish benchmark summary
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          report_path = Path("data/historical/BTCUSDT_reference_strategy_benchmarks.json")
+          summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+          if not report_path.exists():
+              message = "Reference strategy benchmark report was not produced. Inspect the failed step."
+              print(message)
+              if summary_path:
+                  with open(summary_path, "a", encoding="utf-8") as stream:
+                      stream.write("# Public BTC strategy benchmarks\n\n" + message + "\n")
+              raise SystemExit(0)
+
+          report = json.loads(report_path.read_text(encoding="utf-8"))
+          lines = [
+              "# Public BTC strategy benchmarks",
+              "",
+              f'- Data: {report["data"]["symbol"]} {report["data"]["interval"]}, {report["data"]["closed_candle_count"]:,} closed candles',
+              f'- Period: {report["data"]["start_utc"]} to {report["data"]["end_utc"]}',
+              f'- Costs: {report["method"]["costs"]["fee_bps_per_side"]} bps fee + {report["method"]["costs"]["slippage_bps_per_side"]} bps slippage per side',
+              "- Signals use closed candles and enter at the next hourly open. Parameters are fixed from public reference implementations; the test period was not used for tuning.",
+              "",
+              "## Results",
+              "",
+              "| Strategy | Split | Trades | Win rate (%) | Expectancy/trade (%) | Profit factor | Compounded return (%) | Max drawdown (%) |",
+              "|---|---|---:|---:|---:|---:|---:|---:|",
+          ]
+          for strategy in report["strategies"]:
+              for split in ("train", "validation", "test"):
+                  metrics = strategy["splits"][split]["metrics"]
+                  lines.append(
+                      f'| {strategy["name"]} | {split} | {metrics["trade_count"]} | {metrics["win_rate_percent"]} | '
+                      f'{metrics["expectancy_return_percent"]} | {metrics["profit_factor"]} | '
+                      f'{metrics["compounded_return_percent"]} | {metrics["max_drawdown_percent"]} |'
+                  )
+          lines += [
+              "",
+              "## References",
+              "",
+          ]
+          for strategy in report["strategies"]:
+              if strategy["source_reference"] not in [line.split("](")[-1].rstrip(")") for line in lines if "](" in line]:
+                  lines.append(f'- [{strategy["name"]}]({strategy["source_reference"]}): {strategy["rule"]}')
+          lines += [
+              "",
+              "## Interpretation cautions",
+              "",
+              "- Public code is not proof of profitability; results must be compared after costs on the same historical window.",
+              "- The MACD benchmark uses per-trade percentage returns; SuperTrend also uses bracket exits. These metrics are not directly interchangeable with the formal order-block strategy's R-multiple statistics.",
+              "- Short-side results require short-capable margin or derivatives products and are not directly executable on spot.",
+              "- Historical results do not guarantee future performance.",
+          ]
+          content = "\n".join(lines) + "\n"
+          print(content)
+          if summary_path:
+              with open(summary_path, "a", encoding="utf-8") as stream:
+                  stream.write(content)
+          PY
+
+      - name: Upload BTC reference benchmark artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: BTCUSDT-reference-strategy-benchmarks-${{ github.run_id }}
+          path: |
+            data/historical/BTCUSDT_1h.csv
+            data/historical/BTCUSDT_reference_strategy_benchmarks.json
+          if-no-files-found: warn
+          retention-days: 30
