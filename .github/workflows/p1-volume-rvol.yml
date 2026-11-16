@@ -1,0 +1,107 @@
+name: P1-04 frozen volume RVOL research and independent acceptance
+
+on:
+  push:
+    branches: ["codex/p1-04-volume-rvol"]
+    paths:
+      - "p1_volume_rvol.py"
+      - "p1_volume_rvol_audit.py"
+      - "test_p1_volume_rvol.py"
+      - "test_p1_volume_rvol_audit.py"
+      - "P1_04_VOLUME_RVOL_PROTOCOL.json"
+      - "P1_04_VOLUME_RVOL_RESEARCH.md"
+      - "P1_04_ACCEPTANCE.md"
+      - ".github/workflows/p1-volume-rvol.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: p1-04-frozen-volume-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  volume-research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout isolated P1-04 branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - name: Run complete Python tests and preserve log
+        run: |
+          set -euo pipefail
+          mkdir -p research/p1_04_evidence/inputs research/p1_04_evidence/results
+          python -m unittest -v 2>&1 | tee research/p1_04_evidence/python-tests.log
+      - name: Verify protocol and tests were committed before implementation
+        run: |
+          set -euo pipefail
+          git show ed26ba0:P1_04_VOLUME_RVOL_PROTOCOL.json > /tmp/p1-04-initial-protocol.json
+          cmp /tmp/p1-04-initial-protocol.json P1_04_VOLUME_RVOL_PROTOCOL.json
+          git show ed26ba0:test_p1_volume_rvol.py > research/p1_04_evidence/preimplementation_tests.py
+          git log -1 --format='%H %s' ed26ba0 > research/p1_04_evidence/protocol_commit.txt
+      - name: Download only frozen and verified existing GitHub evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/p1-04-frozen /tmp/p1-04-review /tmp/p1-04-context
+          gh run download 43820018876 -R "$GITHUB_REPOSITORY" \
+            -n multi-asset-input-43820018876 -D /tmp/p1-04-frozen
+          gh run download 43857787070 -R "$GITHUB_REPOSITORY" \
+            -n p1-01-review-evidence-43857787070 -D /tmp/p1-04-review
+          gh run download 43862040301 -R "$GITHUB_REPOSITORY" \
+            -n p1-reviewed-propagation-43862040301 -D /tmp/p1-04-context
+          python - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile,ZIP_DEFLATED
+          import shutil
+          import p1_volume_rvol as study
+          root=Path('research/p1_04_evidence/inputs')
+          with ZipFile(root/'frozen-source.zip','w',compression=ZIP_DEFLATED) as z:
+              for f in sorted(Path('/tmp/p1-04-frozen').glob('*')):
+                  if f.is_file():z.write(f,arcname=f.name)
+          for source,target,pins in [
+              (Path('/tmp/p1-04-review/after'),root/'reviewed-p1',study.P1_PINS),
+              (Path('/tmp/p1-04-context'),root/'reviewed-context',study.CONTEXT_PINS)]:
+              for name in pins:
+                  dest=target/name;dest.parent.mkdir(parents=True,exist_ok=True)
+                  shutil.copyfile(source/name,dest)
+          PY
+      - name: Research all 106433 events with fixed RVOL and all context groups
+        run: >-
+          python -u p1_volume_rvol.py
+          --frozen-archive research/p1_04_evidence/inputs/frozen-source.zip
+          --p1-dir research/p1_04_evidence/inputs/reviewed-p1
+          --context-dir research/p1_04_evidence/inputs/reviewed-context
+          --lock PROSPECTIVE_LOCK_V1.json
+          --out-dir research/p1_04_evidence/results
+      - name: Independently verify direct RVOL windows and all 693360 groups
+        run: >-
+          python -u p1_volume_rvol_audit.py
+          --frozen-archive research/p1_04_evidence/inputs/frozen-source.zip
+          --p1-dir research/p1_04_evidence/inputs/reviewed-p1
+          --context-dir research/p1_04_evidence/inputs/reviewed-context
+          --lock PROSPECTIVE_LOCK_V1.json
+          --out-dir research/p1_04_evidence/results
+          --tests-log research/p1_04_evidence/python-tests.log
+      - name: Publish complete Chinese acceptance report
+        if: success()
+        run: |
+          cp P1_04_VOLUME_RVOL_PROTOCOL.json P1_04_VOLUME_RVOL_RESEARCH.md P1_04_ACCEPTANCE.md research/p1_04_evidence/
+          cat research/p1_04_evidence/results/P1_04_RESULT_ZH.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Retain all inputs, results and validation logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p1-04-volume-rvol-evidence-${{ github.run_id }}
+          path: research/p1_04_evidence/
+          retention-days: 45
+          if-no-files-found: error
