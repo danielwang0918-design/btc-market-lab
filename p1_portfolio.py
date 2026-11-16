@@ -140,11 +140,17 @@ def _run_account(policy,model,start,end,assets):
     slip=D(15) if model.endswith('slip15') else D(5);priority='target_first' if model.endswith('target_first') else 'stop_first'
     phase_start=start;last_marks={};max_positions=0;unpriced_hours=0;raw_seen=set()
     def log(t,sym,signal,event,**extra):
+        confirmation={'A':'OB區間代理成交與執行證據',
+            'B':'事前確認價格區域與MA200順勢',
+            'C':'前一根已收盤1H同向型態及RVOL>=1.2',
+            'D':'B與C及ATR正常狀態（獨立研究對照）',
+            'E_ob':'OB觸及後已收盤1H同向收回區間外，下一根開盤',
+            'E_2b':'事前確認pivot的2B假突破收回，下一根開盤'}[policy]
         logs.append(dict(time_ms=t,time_utc=utc(t),symbol=sym,setup_id=signal.get('setup_id',''),event=event,
             direction=signal.get('side',''),entry_low=signal.get('zone_low',''),entry_high=signal.get('zone_high',''),
             entry_reference=signal.get('entry_reference',''),SL=signal.get('stop',''),TP1=signal.get('target',''),TP2='',
             TP2_status='not_defined_by_original_strategy',net_RR=signal.get('net_rr',''),
-            basis='BOS_OB_'+policy,action='offline_simulated_only' if event=='entered' else 'watch',
+            basis='BOS_OB_'+policy,action='僅離線模擬紀錄' if event=='entered' else '觀望',confirmation_required=confirmation,
             invalidation='OB_stop_target_age168h_data_gap_or_required_confirmation_failed',**extra));counts[event]+=1
     def close(t,raw,reason):
         nonlocal cash,position

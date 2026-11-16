@@ -84,6 +84,14 @@ class PortfolioExecutionTests(unittest.TestCase):
         self.assertEqual(r['final_equity'],1000)
         self.assertEqual(r['decision_counts']['historical_filters_unavailable'],1)
 
+    def test_insufficient_execution_evidence_explicitly_says_watch_with_plan(self):
+        r=m.run_account('A','strict_spot',0,4*m.H,{'AAA':FakeAsset()})
+        signal=next(x for x in r['signals'] if x['event']=='historical_filters_unavailable')
+        self.assertEqual(signal['action'],'觀望')
+        self.assertEqual(signal['SL'],'95');self.assertEqual(signal['TP1'],'110')
+        self.assertEqual(signal['TP2'],'')
+        self.assertTrue(signal['confirmation_required'])
+
     def test_cash_equation_fee_pnl_and_actual_risk_reconcile(self):
         r=m.run_account('A','fractional_spot',0,4*m.H,{'AAA':FakeAsset()})
         p=r['trades'][0]
