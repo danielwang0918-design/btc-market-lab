@@ -1,0 +1,77 @@
+name: P1-02 cross-timeframe preexisting support/resistance (research only)
+
+on:
+  push:
+    branches: ["research/p1-02-zones"]
+    paths:
+      - "p1_zone_context.py"
+      - "test_p1_zone_context.py"
+      - ".github/workflows/p1-zone-context-study.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: p1-02-zone-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  frozen-study:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: All repository tests, causal pivot safeguards included
+        run: python -m unittest -v
+      - name: Download already-frozen 1H/4H/1D history and independent P1 events
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p data/p1_02/frozen research/p1_02/upstream
+          gh run download 43820018876 -R "$GITHUB_REPOSITORY" -n multi-asset-input-43820018876 -D data/p1_02/frozen
+          gh run download 43852683913 -R "$GITHUB_REPOSITORY" -n p1-01-closed-candlestick-study-43852683913 -D research/p1_02/upstream
+      - name: Quantify all patterns at previously confirmed higher-frame price zones
+        run: >-
+          python -u p1_zone_context.py
+          --frozen data/p1_02/frozen
+          --p1-artifact research/p1_02/upstream
+          --lock PROSPECTIVE_LOCK_V1.json
+          --out-dir research/p1_02/results
+      - name: Verify unique pattern count and all three fixed horizons
+        run: |
+          python - <<'PY'
+          import csv,json
+          from collections import Counter
+          from pathlib import Path
+          p=Path('research/p1_02/results')
+          r=json.loads((p/'p1_02_manifest.json').read_text())
+          assert r['unique_events']==106155
+          assert r['observations']==318465
+          assert set(r['zone_counts']) <= {'near_confirmed_zone','near_single_pivot_unconfirmed','far_from_nearest_pivot','no_preexisting_pivot','insufficient_prior_atr','reference_data_gap_or_stale'}
+          assert sum(r['zone_counts'].values())==106155
+          with (p/'p1_02_zone_evidence.csv').open(encoding='utf-8-sig',newline='') as f:
+              assert sum(1 for _ in csv.DictReader(f))==106155
+          print('P1-02 observational archive verified:',r['unique_events'])
+          PY
+      - name: Publish research report
+        if: always()
+        run: |
+          if [ -f research/p1_02/results/p1_02_report_zh.md ]; then
+            cat research/p1_02/results/p1_02_report_zh.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "P1-02 failed; do not claim outcome improvements."
+          fi
+      - name: Upload every descriptive stratum (no winner selection)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p1-02-verified-zone-observations-${{ github.run_id }}
+          path: research/p1_02/results/*
+          if-no-files-found: warn
+          retention-days: 45
