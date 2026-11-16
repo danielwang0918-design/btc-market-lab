@@ -66,11 +66,11 @@ class PathTests(unittest.TestCase):
         self.assertEqual(r['mfe_R0_upper'],D('.5'));self.assertEqual(r['mae_R0_lower'],D('1.5'))
 
     def test_same_bar_TP_SL_order_remains_unknown(self):
-        r=m.analyze(trade(),[bar(0,h=125,l=85),bar(1),bar(2)],3,tape=True)
+        r=m.analyze(trade(),[bar(0,h=125,l=85)]+[bar(i) for i in range(1,6)],6,tape=True)
         self.assertEqual(r['TP_SL_order'],'same_bar_unknown')
 
     def test_distinct_bar_TP_SL_order_is_known_only_for_tape(self):
-        r=m.analyze(trade(),[bar(0,h=105,l=85),bar(1,h=125,l=95),bar(2)],3,tape=True)
+        r=m.analyze(trade(),[bar(0,h=105,l=85),bar(1,h=125,l=95)]+[bar(i) for i in range(2,6)],6,tape=True)
         self.assertEqual(r['TP_SL_order'],'SL_first_distinct_bars')
 
     def test_same_bar_extrema_have_unknown_peak_order(self):
@@ -144,6 +144,11 @@ class FeatureTests(unittest.TestCase):
         self.assertEqual(r['ATR_pre'],2)
         self.assertEqual(r['compression_ratio'],1)
         self.assertEqual(r['prebreak_available_ms'],T)
+
+    def test_compression_denominator_excludes_current_prebreak_ATR(self):
+        event,frames=self.fixture();frames['1h'][-3]=bar(-1,h=109,l=91,v=2)
+        r=m.BreakFeatures(frames).at(event)
+        self.assertAlmostEqual(float(r['compression_ratio']),11/7)
 
     def test_midnight_registration_keeps_breach_days_frozen_reference(self):
         event,frames=self.fixture(True)
