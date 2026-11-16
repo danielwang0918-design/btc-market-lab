@@ -53,5 +53,13 @@
       "after_sha256": "8ff0373f3578a8bc296714dbe8bb5e863a881d741597cc8a1ce4a25471e56f80",
       "first_changes": []
     }
+  },
+  "cross_environment_prediction_comparison": {
+    "reason": "Observed 131 probability-only last-bit differences in run43966253569; maximum absolute delta1.3877787807814457e-16, no feature, ID or decision changes",
+    "probability_decimal_places": 12,
+    "canonical_sha256": "4568371497fc4898f8b5c663744b33edb3381b033614126e00d7496da99c75a3",
+    "method": "CSV string rows in original order; only probability formatted with Decimal .12f; JSON sorted keys, ensure_ascii=False, separators comma/colon; SHA256 UTF8",
+    "preserve_full_precision_csv_and_per_run_sha256": true,
+    "other_five_CSVs_remain_byte_exact": true
   }
 }
