@@ -1,6 +1,14 @@
+import importlib.util
 import unittest
 from decimal import Decimal
 import p1_07_ai_audit as m
+
+
+# The inherited Python 3.10 workflow deliberately has no third-party packages.
+# The P1-07 research workflow installs pinned dependencies and runs both fitting
+# tests; all audit, timing and fail-closed tests remain standard-library tests.
+HAS_ML = all(importlib.util.find_spec(name) is not None for name in ('numpy', 'scipy', 'sklearn'))
+ML_REQUIRED = 'Pinned ML dependencies are exercised by the P1-07 research workflow'
 
 
 def plan(key='x', status='eligible', **extra):
@@ -97,6 +105,7 @@ class MetaTests(unittest.TestCase):
         self.assertTrue(all(r['probability']=='' and not r['accept_ml'] for r in predictions))
         self.assertTrue(all(isinstance(r['accept_fixed'],bool) for r in predictions))
 
+    @unittest.skipUnless(HAS_ML, ML_REQUIRED)
     def test_validation_prices_and_labels_cannot_change_train_scaler_or_coefficients(self):
         rows=training_rows()
         val=m.audit_rows([plan(key='v',registration_ms=str(m.VALIDATION),signal_time_ms=str(m.VALIDATION),
@@ -108,6 +117,7 @@ class MetaTests(unittest.TestCase):
         self.assertEqual(a['scaler_mean'],b['scaler_mean'])
         self.assertEqual(a['coefficients'],b['coefficients'])
 
+    @unittest.skipUnless(HAS_ML, ML_REQUIRED)
     def test_future_quality_mask_never_prevents_exante_prediction(self):
         rows=training_rows()
         unknown=m.audit_rows([plan(key='unknown')],[outcome(key='unknown',gap_or_zero_volume_path_unknown='True')])[0]
