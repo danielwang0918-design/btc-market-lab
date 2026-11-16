@@ -1,14 +1,13 @@
 name: Binance multi-asset historical coverage
 
 on:
-  pull_request:
-    branches: ["main"]
+  # Run heavy jobs only for relevant commits; PR cumulative diffs caused repeated cancellations.
+  push:
+    branches: ["main", "codex/**"]
     paths:
       - "multi_asset_history.py"
-      - "test_multi_asset_history.py"
-      - ".github/workflows/multi-asset-history.yml"
-      - "historical_backtest.py"
       - "binance_market_data.py"
+      - "historical_backtest.py"
   workflow_dispatch:
     inputs:
       symbols:
@@ -26,7 +25,7 @@ permissions:
 
 concurrency:
   group: multi-asset-history-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   download-and-audit:

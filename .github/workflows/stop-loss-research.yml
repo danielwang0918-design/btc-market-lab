@@ -1,35 +1,27 @@
 name: BTC stop-loss structure comparison
 
 on:
-  pull_request:
-    branches: ["main"]
+  # Run heavy jobs only for relevant commits; PR cumulative diffs caused repeated cancellations.
+  push:
+    branches: ["main", "codex/**"]
     paths:
       - "stop_loss_research.py"
-      - "test_stop_loss_research.py"
       - "trade_diagnostics.py"
       - "entry_execution_audit.py"
-      - "test_entry_execution_audit.py"
       - "entry_quality_research.py"
-      - "test_entry_quality_research.py"
-      - "test_trade_diagnostics.py"
       - "pattern_research.py"
-      - "test_pattern_research.py"
       - "pattern_trade_study.py"
-      - "test_pattern_trade_study.py"
       - "historical_backtest.py"
-      - "market_structure.py"
       - "market_research.py"
-      - "winrate_research.py"
-      - "binance_market_data.py"
-      - ".github/workflows/stop-loss-research.yml"
+      - "market_structure.py"
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: btc-stop-loss-research
-  cancel-in-progress: true
+  group: btc-stop-loss-research-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   comparison:

@@ -1,16 +1,14 @@
 name: BTC win-rate research
 
 on:
-  pull_request:
-    branches: ["main"]
+  # Run heavy jobs only for relevant commits; PR cumulative diffs caused repeated cancellations.
+  push:
+    branches: ["main", "codex/**"]
     paths:
       - "winrate_research.py"
-      - "test_winrate_research.py"
       - "historical_backtest.py"
       - "market_research.py"
       - "market_structure.py"
-      - "binance_market_data.py"
-      - ".github/workflows/winrate-research.yml"
   workflow_dispatch:
 
 permissions:
@@ -18,7 +16,7 @@ permissions:
 
 concurrency:
   group: win-rate-research-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   win-rate-study:

@@ -1,12 +1,16 @@
 name: Binance multi-asset fixed-rule baseline
 
 on:
-  pull_request:
-    branches: ["main"]
+  # Run heavy jobs only for relevant commits; PR cumulative diffs caused repeated cancellations.
+  push:
+    branches: ["main", "codex/**"]
     paths:
       - "multi_asset_baseline.py"
-      - "test_multi_asset_baseline.py"
-      - ".github/workflows/multi-asset-baseline.yml"
+      - "multi_asset_history.py"
+      - "historical_backtest.py"
+      - "market_research.py"
+      - "market_structure.py"
+      - "binance_market_data.py"
   workflow_dispatch:
     inputs:
       symbols:
@@ -24,7 +28,7 @@ permissions:
 
 concurrency:
   group: multi-asset-baseline-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   prepare:
@@ -151,6 +155,12 @@ jobs:
           --coverage data/multi_asset/multi_asset_coverage.json
           --results-dir research/multi_asset/individual
           --output-dir research/multi_asset/summary
+      - name: Produce calendar-week correlated-sample robustness audit
+        run: >-
+          python -u multi_asset_robustness.py
+          --baseline research/multi_asset/summary/multi_asset_fixed_calendar_baseline.json
+          --trades research/multi_asset/summary/multi_asset_fixed_calendar_trades.csv
+          --output-dir research/multi_asset/robustness
       - name: Publish readable strategy scoreboard
         if: always()
         run: |
@@ -162,6 +172,12 @@ jobs:
           else
             echo 'Multi-asset scoreboard missing; check the preceding failure.'
           fi
+            if [ -f research/multi_asset/robustness/multi_asset_robustness.md ]; then
+              cat research/multi_asset/robustness/multi_asset_robustness.md
+              if [ -n "$GITHUB_STEP_SUMMARY" ]; then
+                cat research/multi_asset/robustness/multi_asset_robustness.md >> "$GITHUB_STEP_SUMMARY"
+              fi
+            fi
       - name: Upload cross-symbol reports and input provenance
         if: always()
         uses: actions/upload-artifact@v4
@@ -171,6 +187,8 @@ jobs:
             research/multi_asset/summary/multi_asset_fixed_calendar_baseline.json
             research/multi_asset/summary/multi_asset_fixed_calendar_baseline.md
             research/multi_asset/summary/multi_asset_fixed_calendar_trades.csv
+            research/multi_asset/robustness/multi_asset_robustness.json
+            research/multi_asset/robustness/multi_asset_robustness.md
             data/multi_asset/universe_selection.json
             data/multi_asset/multi_asset_coverage.json
           if-no-files-found: warn
