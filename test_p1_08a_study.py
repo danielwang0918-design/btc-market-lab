@@ -43,6 +43,16 @@ class ArchiveTests(unittest.TestCase):
         args=account();args[1][0]['feature_cutoff_ms']=str(money.START+1)
         with self.assertRaises(ValueError):m.audit_account(*args)
 
+    def test_coordinated_understated_risk_and_R_cannot_pass_budget_audit(self):
+        args=account();t=args[1][0]
+        t['planned_risk']=str(D(t['planned_risk'])/2)
+        t['r_multiple']=str(D(t['net_pnl_usdt'])/D(t['planned_risk']))
+        with self.assertRaises(ValueError):m.audit_account(*args)
+
+    def test_understated_reservation_cannot_pass_cash_audit(self):
+        args=account();args[1][0]['cash_required']='1'
+        with self.assertRaises(ValueError):m.audit_account(*args)
+
     def test_spot_short_is_never_silently_merged(self):
         args=account();args[1][0]['side']='short'
         with self.assertRaises(ValueError):m.audit_account(*args)
