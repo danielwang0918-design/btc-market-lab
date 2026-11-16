@@ -66,4 +66,13 @@ class ReferenceTests(unittest.TestCase):
         candidate=next(r for r in rows if r['policy']=='T20_CONT' and r['edge']=='upper')
         self.assertEqual(candidate['status'],'eligible')
         self.assertEqual(candidate['entry_time_ms'],t+3600000)
+    def test_atr_cannot_bridge_gap_immediately_before_utc_day(self):
+        t=old.START
+        daily=[b(t-(20-i)*DAY) for i in range(20)];daily[15]=b(t-5*DAY,h=120,l=80)
+        bars=[b(t-7200000),b(t,h=123,l=99,o=100,close=121),b(t+3600000,h=122,l=118,o=121,close=119)]
+        a=SimpleNamespace(symbol='BTCUSDT',bars=bars,frames={'1d':daily},reg=SimpleNamespace(atr=[1,None,None]),by_time={x.open_ms:i for i,x in enumerate(bars)},times=[x.open_ms for x in bars])
+        a.stop_context_cache={x.open_ms:dict(feature_cutoff_ms=x.open_ms,atr=None,volatility='unknown') for x in bars}
+        rows,_=m.generate(a)
+        candidate=next(r for r in rows if r['policy']=='T20_CONT' and r['edge']=='upper')
+        self.assertEqual(candidate['status'],'preconfirmation_ATR_gap')
 if __name__=='__main__':unittest.main()
