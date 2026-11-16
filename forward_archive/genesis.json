@@ -1,0 +1,223 @@
+{
+  "version": "p0-forward-prospective-ledger-v1",
+  "lock_sha256": "42c0d049a8f277934b2908767869e1c6830009c47f346463140c9abac7549dbf",
+  "asof_utc": "2026-11-16T10:00:00+00:00",
+  "previous_record_sha256": null,
+  "files": {
+    "BTCUSDT_1d.csv": {
+      "full_bytes": 835188,
+      "full_sha256": "5dced7ebdf9078dc43092e29a35f24284015c88bfb9fb99e67472606204f2f8e",
+      "appended_closed_candles": 0,
+      "total_bars": 3378,
+      "last_closed_end_exclusive_utc": "2026-11-16T00:00:00+00:00",
+      "new_first_open_utc": null
+    },
+    "BTCUSDT_4h.csv": {
+      "full_bytes": 4989903,
+      "full_sha256": "77edd1d0f48fcb55127012fda99b89af225c94d5e4ef7d889c222444f1f715de",
+      "appended_closed_candles": 0,
+      "total_bars": 20252,
+      "last_closed_end_exclusive_utc": "2026-11-16T04:00:00+00:00",
+      "new_first_open_utc": null
+    },
+    "BTCUSDT_1h.csv": {
+      "full_bytes": 19896285,
+      "full_sha256": "d6925000d2ae264eaa36c11fe3f02777c3e42fdd248b55bf39fd686137122016",
+      "appended_closed_candles": 0,
+      "total_bars": 80946,
+      "last_closed_end_exclusive_utc": "2026-11-16T06:00:00+00:00",
+      "new_first_open_utc": null
+    },
+    "ETHUSDT_1d.csv": {
+      "full_bytes": 822876,
+      "full_sha256": "36c6650e3946d05b2091a4fea37547e7541c28c881e4b5a9bd3da03d6ae9dc7d",
+      "appended_closed_candles": 0,
+      "total_bars": 3378,
+      "last_closed_end_exclusive_utc": "2026-11-16T00:00:00+00:00",
+      "new_first_open_utc": null
+    },
+    "ETHUSDT_4h.csv": {
+      "full_bytes": 4916636,
+      "full_sha256": "5e16d3c283a7e9f2322c8cb6d8da5eff9a1d1b9045620d9bf5ca32112a046cd0",
+      "appended_closed_candles": 0,
+      "total_bars": 20252,
+      "last_closed_end_exclusive_utc": "2026-11-16T04:00:00+00:00",
+      "new_first_open_utc": null
+    },
+    "ETHUSDT_1h.csv": {
+      "full_bytes": 19601927,
+      "full_sha256": "3ccf0594ec46fb38a5b5bfb45caa65e9bafdc385617076661f199820c91420d0",
+      "appended_closed_candles": 0,
+      "total_bars": 80946,
+      "last_closed_end_exclusive_utc": "2026-11-16T06:00:00+00:00",
+      "new_first_open_utc": null
+    },
+    "SOLUSDT_1d.csv": {
+      "full_bytes": 547935,
+      "full_sha256": "d105cd7033d32e4fa26c35c224bc85fc21c4650bece6fb725842516befa87655",
+      "appended_closed_candles": 0,
+      "total_bars": 2288,
+      "last_closed_end_exclusive_utc": "2026-11-16T00:00:00+00:00",
+      "new_first_open_utc": null
+    },
+    "SOLUSDT_4h.csv": {
+      "full_bytes": 3275180,
+      "full_sha256": "9ce9fd1a055f8f9ce2c4f075d3fdbc9d7896cdb244932c0a53f28e7bcc460039",
+      "appended_closed_candles": 0,
+      "total_bars": 13728,
+      "last_closed_end_exclusive_utc": "2026-11-16T04:00:00+00:00",
+      "new_first_open_utc": null
+    },
+    "SOLUSDT_1h.csv": {
+      "full_bytes": 13062548,
+      "full_sha256": "46376068eebbfdf544e22777bdffca625ce27869e8f1870a68e909521b1d0e2e",
+      "appended_closed_candles": 0,
+      "total_bars": 54892,
+      "last_closed_end_exclusive_utc": "2026-11-16T06:00:00+00:00",
+      "new_first_open_utc": null
+    },
+    "ZECUSDT_1d.csv": {
+      "full_bytes": 665718,
+      "full_sha256": "2723e4d46628e30505954b142f5bdba967da758ba4564fd54043d563b9da43a0",
+      "appended_closed_candles": 0,
+      "total_bars": 2797,
+      "last_closed_end_exclusive_utc": "2026-11-16T00:00:00+00:00",
+      "new_first_open_utc": null
+    },
+    "ZECUSDT_4h.csv": {
+      "full_bytes": 3978624,
+      "full_sha256": "1b0570e75396734d51a7d548457280199db63d9b0e5ef70269d5f31d1a8c3351",
+      "appended_closed_candles": 0,
+      "total_bars": 16778,
+      "last_closed_end_exclusive_utc": "2026-11-16T04:00:00+00:00",
+      "new_first_open_utc": null
+    },
+    "ZECUSDT_1h.csv": {
+      "full_bytes": 15860152,
+      "full_sha256": "a1ba9bc0923ee72645c0cdfee4cddee56373f8381b87b70bc760bd67abd99000",
+      "appended_closed_candles": 0,
+      "total_bars": 67076,
+      "last_closed_end_exclusive_utc": "2026-11-16T06:00:00+00:00",
+      "new_first_open_utc": null
+    },
+    "XRPUSDT_1d.csv": {
+      "full_bytes": 735375,
+      "full_sha256": "53555fbfd31f97085d2fb5c5acd51a6f5dfd0a66afbb0248274488dc99de873c",
+      "appended_closed_candles": 0,
+      "total_bars": 3118,
+      "last_closed_end_exclusive_utc": "2026-11-16T00:00:00+00:00",
+      "new_first_open_utc": null
+    },
+    "XRPUSDT_4h.csv": {
+      "full_bytes": 4393464,
+      "full_sha256": "f4af1dc48cc804fdff1f74799d145cd50d806097d01a043b25ac8a3beb115ca7",
+      "appended_closed_candles": 0,
+      "total_bars": 18698,
+      "last_closed_end_exclusive_utc": "2026-11-16T04:00:00+00:00",
+      "new_first_open_utc": null
+    },
+    "XRPUSDT_1h.csv": {
+      "full_bytes": 17517489,
+      "full_sha256": "4a50caf72b8f5bfdaafe08ea56b9b0abce611ab7c772169a51767aad539bc432",
+      "appended_closed_candles": 0,
+      "total_bars": 74743,
+      "last_closed_end_exclusive_utc": "2026-11-16T07:00:00+00:00",
+      "new_first_open_utc": null
+    },
+    "BNBUSDT_1d.csv": {
+      "full_bytes": 790422,
+      "full_sha256": "5dceab1df514152a56bba499404a50a83045fedbd8ea1226117e6860af0dfab9",
+      "appended_closed_candles": 0,
+      "total_bars": 3297,
+      "last_closed_end_exclusive_utc": "2026-11-16T00:00:00+00:00",
+      "new_first_open_utc": null
+    },
+    "BNBUSDT_4h.csv": {
+      "full_bytes": 4721375,
+      "full_sha256": "eada22ec3e4b8e759843ebae9d820f31db5008bc1b3879f0df346d6bd3453c01",
+      "appended_closed_candles": 0,
+      "total_bars": 19767,
+      "last_closed_end_exclusive_utc": "2026-11-16T04:00:00+00:00",
+      "new_first_open_utc": null
+    },
+    "BNBUSDT_1h.csv": {
+      "full_bytes": 18820982,
+      "full_sha256": "62c430f13aa1942dc09a0d28f3db021aae4734b1b22f7e599563423d919c1224",
+      "appended_closed_candles": 0,
+      "total_bars": 79010,
+      "last_closed_end_exclusive_utc": "2026-11-16T07:00:00+00:00",
+      "new_first_open_utc": null
+    },
+    "NEARUSDT_1d.csv": {
+      "full_bytes": 524660,
+      "full_sha256": "25b1489ae35e99dd695cbaa20e6b478ae3549ee1313b58fd23f48db02d9df0d8",
+      "appended_closed_candles": 0,
+      "total_bars": 2224,
+      "last_closed_end_exclusive_utc": "2026-11-16T00:00:00+00:00",
+      "new_first_open_utc": null
+    },
+    "NEARUSDT_4h.csv": {
+      "full_bytes": 3136506,
+      "full_sha256": "90477979c361933811ce1cbedeed62fb021fd6120717677510b1034e665f1275",
+      "appended_closed_candles": 0,
+      "total_bars": 13344,
+      "last_closed_end_exclusive_utc": "2026-11-16T04:00:00+00:00",
+      "new_first_open_utc": null
+    },
+    "NEARUSDT_1h.csv": {
+      "full_bytes": 12505442,
+      "full_sha256": "e98e51f45b78d7d665f5eb6fb1811093b618827bf8d2af382507caf4daf49d53",
+      "appended_closed_candles": 0,
+      "total_bars": 53358,
+      "last_closed_end_exclusive_utc": "2026-11-16T07:00:00+00:00",
+      "new_first_open_utc": null
+    },
+    "DOGEUSDT_1d.csv": {
+      "full_bytes": 638945,
+      "full_sha256": "0d61caad638f304d807e120fadddaacf4f43e9210d590f3d87c8e3fcb1ffc4bd",
+      "appended_closed_candles": 0,
+      "total_bars": 2691,
+      "last_closed_end_exclusive_utc": "2026-11-16T00:00:00+00:00",
+      "new_first_open_utc": null
+    },
+    "DOGEUSDT_4h.csv": {
+      "full_bytes": 3819081,
+      "full_sha256": "1acf353b2d59f248574b3c99452e90e64cce1c6aa98a7358e8e853bb0ff3773f",
+      "appended_closed_candles": 0,
+      "total_bars": 16142,
+      "last_closed_end_exclusive_utc": "2026-11-16T04:00:00+00:00",
+      "new_first_open_utc": null
+    },
+    "DOGEUSDT_1h.csv": {
+      "full_bytes": 15226538,
+      "full_sha256": "64f665f7d67e76439557ef8ec8adfe7a74a822a5e50cda558c1c2f8771c7c6fa",
+      "appended_closed_candles": 0,
+      "total_bars": 64535,
+      "last_closed_end_exclusive_utc": "2026-11-16T07:00:00+00:00",
+      "new_first_open_utc": null
+    }
+  },
+  "result": {
+    "status": "preregistered_not_started",
+    "decision_timeframes": [
+      "1d",
+      "4h",
+      "1h"
+    ],
+    "future_trade_count": 0,
+    "eligible_symbols": [
+      "BTCUSDT",
+      "ETHUSDT",
+      "SOLUSDT",
+      "ZECUSDT",
+      "XRPUSDT",
+      "BNBUSDT",
+      "NEARUSDT",
+      "DOGEUSDT"
+    ],
+    "protocol_start_utc": "2026-11-17T00:00:00+00:00",
+    "protocol_end_exclusive_utc": "2028-01-01T00:00:00+00:00"
+  },
+  "warning": "Hash-chained, append-only relative to supplied prior record; requires externally archived immutable checkpoints to resist whole-chain replacement.",
+  "record_sha256": "f96c42b9e1d3dc1224cdf01d0f05ec54be90a4e6cc60e9d535770be9321249f0"
+}

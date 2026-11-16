@@ -1,0 +1,25 @@
+{
+  "version": "p0-daily-data-archive-v1",
+  "protocol_sha256": "42c0d049a8f277934b2908767869e1c6830009c47f346463140c9abac7549dbf",
+  "symbols": [
+    "BTCUSDT",
+    "ETHUSDT",
+    "SOLUSDT",
+    "ZECUSDT",
+    "XRPUSDT",
+    "BNBUSDT",
+    "NEARUSDT",
+    "DOGEUSDT"
+  ],
+  "baseline_run_id": 43820018876,
+  "genesis_run_id": 43845519180,
+  "genesis_record_sha256": "f96c42b9e1d3dc1224cdf01d0f05ec54be90a4e6cc60e9d535770be9321249f0",
+  "seed_sha256": "61da24e22287d91e506ef373f2ecb008ff5e168632a99c639fbd96846abb2f2a",
+  "data_timeframes": [
+    "1d",
+    "4h",
+    "1h"
+  ],
+  "strategy_results_in_archive": false,
+  "real_order_placement": false
+}
