@@ -145,6 +145,12 @@ class FeatureTests(unittest.TestCase):
         self.assertEqual(r['compression_ratio'],1)
         self.assertEqual(r['prebreak_available_ms'],T)
 
+    def test_prebreak_cost_proxy_uses_prior_close_not_future_exit(self):
+        event,frames=self.fixture();r=m.BreakFeatures(frames).at(event)
+        self.assertEqual(r['prebreak_ATR_pct'],2)
+        self.assertEqual(r['flat_cost5_over_ATR_pre'],D('.15'))
+        self.assertEqual(r['flat_cost15_over_ATR_pre'],D('.25'))
+
     def test_compression_denominator_excludes_current_prebreak_ATR(self):
         event,frames=self.fixture();frames['1h'][-3]=bar(-1,h=109,l=91,v=2)
         r=m.BreakFeatures(frames).at(event)
