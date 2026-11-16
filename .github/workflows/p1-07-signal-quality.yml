@@ -56,6 +56,9 @@ jobs:
           assert not m['new_OOS'] and not m['live_execution']
           assert len(m['frozen_source_sha256'])==24 and m['frozen_candle_count']==717638
           for name,digest in m['output_sha256'].items():assert hashlib.sha256((root/name).read_bytes()).hexdigest()==digest,name
+          correction=json.loads(Path('P1_07_CAUSAL_CORRECTION.json').read_text())
+          for name,comparison in correction['comparison'].items():
+              assert hashlib.sha256((root/name).read_bytes()).hexdigest()==comparison['after_sha256'],name
           source_events=rows('new_signal_events.csv')
           ids={r['event_id'] for r in source_events}
           assert len(source_events)==2*len(ids)
@@ -88,7 +91,7 @@ jobs:
           PY
       - name: Publish Chinese research and locked methods
         run: |
-          cp AGENTS.md P1_07_PROTOCOL.json P1_07_RESEARCH_SPEC.md P1_07_ACCEPTANCE.md P1_07_AI_FEASIBILITY.md research/p1_07_evidence/
+          cp AGENTS.md P1_07_PROTOCOL.json P1_07_RESEARCH_SPEC.md P1_07_ACCEPTANCE.md P1_07_AI_FEASIBILITY.md P1_07_CAUSAL_CORRECTION.json research/p1_07_evidence/
           cat research/p1_07_evidence/results/P1_07_RESULT_ZH.md >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         if: always()

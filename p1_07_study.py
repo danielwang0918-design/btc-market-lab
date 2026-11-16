@@ -183,6 +183,7 @@ def chinese_report(out,accounts,groups,baseline,qualified,meta):
     lines += ['', '## 判定與限制','',f'通過事前嚴格正期望與風險／跨幣／Test／15bps門檻候選：{", ".join(qualified) or "0個"}。即使歷史通過也需新前瞻資料，不能宣稱可交易優勢。',
         'SL降低、分類accuracy較高或保留1000本金不能單獨算成功。ML若拒絕所有機會，勝率與淨R未定義；不降低0.5閾值補交易。固定成本篩選仍需與原A的完整帳戶而非不同結束日餘額比較。',
         'Wyckoff完整range/phase/secondary test尚無凍結標籤，第一輪沒有第三新策略；Turtle Soup採20日價位之1H收盤改編，固定2R/72h、沒有原版ticks與trailing/reentry，不冒稱原版績效。R3文件未取得，未假稱其協議。',
+        '因果修正：原固定規格下一根零量拒絕子句不可在開盤知道，先提交99c693b失敗測試後移除未來成交量入場篩選；開盤後零量僅標記路徑不確定。原protocol逐字保留，修正說明見P1_07_ACCEPTANCE.md。',
         '有限OHLC可行悲觀／樂觀是每事件條件情境，完整帳戶不是全局數學上下界。原料缺口、零量與歷史交易規則／深度／借幣未知保留，2%正常模型風險不保證實損上限；無新OOS、iid顯著性或真實執行認證。',
         '全部原始候選／拒絕、共同事件孤立配對、96組新帳戶、完整CSV、曲線PNG、程式／來源／輸出SHA256與封存來源ZIP均保留；沒有重跑六個舊方案。','']
     (out/'P1_07_RESULT_ZH.md').write_text('\n'.join(lines),encoding='utf-8')

@@ -75,7 +75,10 @@ def generate(a):
                 j=found;confirm=a.bars[j];t=confirm.open_ms+money.H
                 if t>=day+DAY or t in old.CUTS or t>=old.END:reject('day_or_split_expired');continue
                 k=a.by_time.get(t)
-                if k is None or a.bars[k].v==0:reject('next_open_gap_or_zero');continue
+                # The next open quote is available at entry, its final hourly
+                # volume is not. outcome_paths flags zero-volume uncertainty
+                # after entry; never select opportunities using that future bar.
+                if k is None:reject('next_open_gap');continue
                 e=a.bars[k].o
                 valid_location=entry_location(p['side'],e,level)
                 # Both long arms must stay above their respective level; short mirror.
