@@ -1,0 +1,98 @@
+name: P1-08A frozen market-state failure diagnosis
+on:
+  push:
+    branches: ["codex/p1-08a-regime-diagnostics"]
+    paths: ["p1_08a_*.py", "test_p1_08a_*.py", "P1_08A_*", ".github/workflows/p1-08a-regime-diagnostics.yml"]
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: p1-08a-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  diagnosis:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      MPLCONFIGDIR: /tmp/p1-08a-mpl
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install matplotlib==3.10.8 numpy==2.3.5 scipy==1.17.0 scikit-learn==1.8.0
+      - name: Require preregistration and all inherited files unchanged
+        run: |
+          set -euo pipefail
+          git show 5dd6781:P1_08A_PROTOCOL.json > /tmp/p1-08a-fixed.json
+          cmp /tmp/p1-08a-fixed.json P1_08A_PROTOCOL.json
+          git diff --quiet --diff-filter=DMRTUXB 6865531f2b5b5f5fa8ce7741102836ca73694d64 -- .
+      - name: All Python tests including pinned ML fitting tests
+        run: |
+          set -euo pipefail
+          mkdir -p research/p1_08a_evidence/inputs
+          python -m unittest -v 2>&1 | tee research/p1_08a_evidence/python-tests.log
+      - name: Download exact archived research without exchange requests
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api repos/$GITHUB_REPOSITORY/actions/artifacts/14276611830/zip > research/p1_08a_evidence/inputs/p1-07-source.zip
+      - name: Read-only diagnosis with strategy entry points disabled
+        run: |
+          python -u - <<'PY'
+          from pathlib import Path
+          import p1_portfolio, p1_stop_candidates, p1_07_study, p1_08a_study
+          def forbidden(*args,**kwargs):raise AssertionError('Strategy replay forbidden in P1-08A')
+          p1_portfolio.run_account=forbidden
+          p1_stop_candidates.ledger=forbidden
+          p1_stop_candidates.outcome_paths=forbidden
+          p1_07_study.run=forbidden
+          p1_08a_study.run(Path('research/p1_08a_evidence/inputs/p1-07-source.zip'),Path('research/p1_08a_evidence/results'))
+          PY
+      - name: Independent output, time, population and cash acceptance
+        run: |
+          python - <<'PY'
+          import csv,json,hashlib
+          from pathlib import Path
+          root=Path('research/p1_08a_evidence/results')
+          def rows(name):return list(csv.DictReader((root/name).open(encoding='utf-8-sig')))
+          m=json.loads((root/'p1_08a_manifest.json').read_text())
+          assert m['account_profiles']==160 and m['all_accounts_verified']
+          assert m['source_output_hashes_verified']==361 and len(m['frozen_source_sha256'])==24
+          assert m['frozen_candles']==717638 and m['strategy_replays']==0
+          assert not m['parameter_optimization'] and not m['new_OOS'] and not m['live_execution']
+          for name,digest in m['output_sha256'].items():assert hashlib.sha256((root/name).read_bytes()).hexdigest()==digest,name
+          accounts=rows('account_audit.csv');assert len(accounts)==160 and all(r['verified']=='True' for r in accounts)
+          snapshots=rows('opportunity_snapshots.csv')
+          assert len(snapshots)==m['opportunity_snapshot_rows']==28829
+          assert len([r for r in snapshots if r['stage']=='registration'])==25176
+          assert len({(r['policy'],r['event_id'],r['stage']) for r in snapshots})==len(snapshots)
+          for r in rows('unique_time_feature_audit.csv'):
+              t=int(r['decision_time_ms'])
+              assert int(r['feature_cutoff_ms'])==t
+              for frame,step in [('1h',3600000),('4h',14400000),('1d',86400000)]:
+                  close=r['reference_close_ms_'+frame]
+                  if close:assert int(close)<=t and int(close)==t//step*step
+                  else:assert r['status_'+frame]=='reference_gap_or_stale'
+          stats=rows('state_statistics.csv')
+          assert len(stats)==m['state_statistic_rows'] and any(r['n']=='0' and r['mean_net_R']=='' for r in stats)
+          assert len(rows('fixed_hypothesis_contrasts.csv'))==48
+          assert len(rows('actual_trade_diagnostics.csv'))==32232
+          for r in rows('data_quality.csv'):assert r['duplicate_or_unclosed_or_invalid_bars']=='0'
+          (root/'acceptance.json').write_text(json.dumps(dict(account_profiles_verified=160,source_hashes_verified=True,
+              causal_closed_references_verified=True,complete_population_and_zero_cells_verified=True,
+              strategy_entry_points_disabled=True,strategy_replays=0,new_OOS=False,live_execution=False),indent=2)+'\n')
+          PY
+      - name: Publish Traditional Chinese methods, diagnosis and limits
+        run: |
+          cp AGENTS.md P1_08A_*.md P1_08A_PROTOCOL.json research/p1_08a_evidence/
+          cat research/p1_08a_evidence/results/P1_08A_RESULT_ZH.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: p1-08a-regime-diagnosis-${{ github.run_id }}
+          path: research/p1_08a_evidence/
+          retention-days: 45
+          if-no-files-found: error

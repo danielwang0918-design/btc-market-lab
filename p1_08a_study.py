@@ -35,6 +35,15 @@ def audit_account(summary,trades,curve,decisions):
         if abs(D(r['equity_before'])-cash)>D('1e-12'):raise ValueError('Equity before mismatch')
         if D(r['cash_required'])>cash+D('1e-12') or D(r['planned_risk'])>cash*D('.02')+D('1e-12'):raise ValueError('Excess cash or risk')
         q=D(r['quantity']);ef=D(r['entry_fill']);xf=D(r['exit_fill'])
+        e,s,x=(D(r[key]) for key in ('raw_entry','stop','raw_exit'))
+        slip=D(15) if r['scenario']=='source_slip15' else D(5)
+        if not (s<e if r['side']=='long' else s>e):raise ValueError('Invalid stop direction')
+        if abs(ef-money.fill(e,r['side'],True,slip))>D('1e-12') or abs(xf-money.fill(x,r['side'],False,slip))>D('1e-12'):
+            raise ValueError('Archived slippage/fill assumption mismatch')
+        expected_risk=-q*money.net_per_unit(e,s,r['side'],slip)
+        if abs(D(r['planned_risk'])-expected_risk)>D('1e-12') or abs(D(r['risk_budget'])-cash*D('.02'))>D('1e-12'):
+            raise ValueError('Price-based stop risk or budget mismatch')
+        if abs(D(r['cash_required'])-q*ef*D('1.001'))>D('1e-12'):raise ValueError('Cash reservation arithmetic mismatch')
         expected_fee=q*(ef+xf)*D('.001')
         if abs(expected_fee-D(r['fees_usdt']))>D('1e-12'):raise ValueError('Archived fee mismatch')
         gross=q*(xf-ef)*(1 if r['side']=='long' else -1)
@@ -222,6 +231,7 @@ def _run(source_zip,out):
                 frozen_source_sha256={r['symbol']+'_'+r['frame']+'.csv':r['sha256'] for r in quality},frozen_candles=sum(r['bars'] for r in quality),
                 source_output_hashes_verified=len(manifest['output_sha256']),account_profiles=len(accounts),all_accounts_verified=all(r['verified'] for r in audits),
                 opportunity_rows=len(plans),opportunity_snapshot_rows=len(snapshots),isolated_outcome_rows=len(iso),
+                unique_event_ids=len({p['event_id'] for p in plans}),
                 actual_trade_rows=len(enriched),state_statistic_rows=len(groups),unique_feature_cutoffs=len(features),
                 fixed_contrast_rows=len(contrasts),recommended_mechanism_hypotheses=eligible,positive_expectancy_strategies=0,
                 strategy_replays=0,parameter_optimization=False,new_OOS=False,live_execution=False,

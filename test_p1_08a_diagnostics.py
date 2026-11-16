@@ -11,6 +11,12 @@ def bar(i, close=100, high=None, low=None, volume=1, step=3600000):
 
 
 class TimingTests(unittest.TestCase):
+    def test_raw_feature_book_contains_no_realized_or_account_labels(self):
+        book=m.FeatureBook({'1h':[bar(i) for i in range(240)]})
+        out=book.at(240*m.H)
+        blocked={'status','source_final_status','net_pnl_usdt','exit_reason','equity_before','path_dependent_outcome'}
+        self.assertFalse(set(out)&blocked)
+
     def test_future_entry_bar_prices_and_volume_cannot_change_features(self):
         bars=[bar(i,100+i/100) for i in range(240)]
         a=m.FrameState(bars,'1h').at(240*m.H)
@@ -161,6 +167,22 @@ class UncertaintyTests(unittest.TestCase):
 
     def test_missing_samples_cannot_qualify_hypothesis(self):
         self.assertFalse(m.hypothesis_eligible([]))
+
+    def qualified_rows(self):
+        return [dict(period=period,universe=universe,scenario='source_stop_first',group_a_n=40,group_b_n=40,
+            difference_R=.2,difference_low95=.1) for period,universe in
+            [('train','all_eight'),('validation','all_eight'),('continuous','all_eight'),('continuous','BTC'),('continuous','other_seven'),('opened_test','all_eight')]]
+
+    def test_consistent_adequate_mechanism_can_qualify_but_is_not_a_strategy(self):
+        self.assertTrue(m.hypothesis_eligible(self.qualified_rows()))
+
+    def test_validation_reversal_cannot_be_hidden_by_positive_pooled_result(self):
+        rows=self.qualified_rows();rows[1]['difference_R']=-.1
+        self.assertFalse(m.hypothesis_eligible(rows))
+
+    def test_insufficient_opened_test_is_inconclusive_not_automatic_pass(self):
+        rows=self.qualified_rows();rows[-1]['group_b_n']=2
+        self.assertFalse(m.hypothesis_eligible(rows))
 
 
 if __name__=='__main__':unittest.main()
