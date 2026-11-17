@@ -194,6 +194,45 @@ class ReceiverTests(unittest.TestCase):
         self.collect()
         with self.assertRaises(ValueError):mod.Receiver(self.root,expected_mode='real_public')
 
+    def test_mode_must_match_original_p1_08c_registry_even_if_contract_rehashed(self):
+        p=self.root/'contract.json';value=json.loads(p.read_text());value['mode']='real_public'
+        value['contract_sha256']=mod.c.sha_bytes(mod.c.canonical({k:v for k,v in value.items() if k!='contract_sha256'}))
+        p.chmod(0o644);p.write_bytes(mod.c.canonical(value)+b'\n')
+        with self.assertRaises(ValueError):mod.Receiver(self.root).verify()
+
+    def test_exchange_clock_reversal_even_within_offset_tolerance_blocks_evidence(self):
+        calls=[0];original=self.open_it
+        def opener(req,timeout):
+            if req.full_url.endswith('/time'):
+                calls[0]+=1;return Response({'serverTime':self.now+(1000 if calls[0]==1 else 0)})
+            return original(req,timeout)
+        self.r.opener=opener;r=self.collect()
+        self.assertFalse(r['clock_context_verified']);self.assertEqual(r['new_evidence'],0)
+
+    def test_unclosed_4h_and_daily_are_not_confirmed(self):
+        for frame in ('4h','1d'):
+            meta=dict(url=mod.url('klines','BTCUSDT',frame),raw_sha256='a'*64,request_started_at=utc(self.now),system_received_at=utc(self.now))
+            with self.subTest(frame=frame):
+                _,closed,_=mod.normalize(row(T,frame),'BTCUSDT',frame,meta,self.now,0)
+                self.assertFalse(closed)
+
+    def test_wall_forward_jump_is_detected_against_monotonic(self):
+        ticks=iter([self.now,self.now+10000])
+        with patch.object(mod.time,'monotonic_ns',side_effect=[0,1000000]):
+            _,m=mod.transport('time',None,None,clock=lambda:next(ticks),opener=self.open_it,session_id='synthetic')
+        self.assertFalse(m['clock_locally_consistent'])
+
+    def test_http200_api_error_is_not_valid_data(self):
+        original=self.open_it
+        self.r.opener=lambda req,timeout:Response({'code':-1121,'msg':'synthetic API error'}) if '/klines?' in req.full_url else original(req,timeout)
+        r=self.collect();self.assertGreater(r['invalid_rows'],0);self.assertEqual(r['new_evidence'],0)
+
+    def test_snapshot_path_traversal_rejected(self):
+        from zipfile import ZipFile
+        archive=self.root.parent/'malicious.zip'
+        with ZipFile(archive,'x') as z:z.writestr('../escape','bad')
+        with self.assertRaises(ValueError):mod.Receiver.restore(archive,self.root.parent/'unsafe',expected_sha256=sha_file(archive),anchor=self.r.checkpoint())
+
     def test_no_candidate_or_order_path_is_activated(self):
         self.collect()
         self.assertEqual(self.r.verify()['candidates'],0)
