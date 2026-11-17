@@ -329,6 +329,8 @@ class RegistryTests(unittest.TestCase):
         candidate['features']['last_close']['evidence_ids']=[e['record_sha256']]
         self.r.register(candidate);a=self.r.audit()
         self.assertEqual(a['unique_events'],2);self.assertEqual(a['cross_symbol_overlap_pairs'],1)
+        self.assertEqual(a['overlap_connected_components'],1)
+        self.assertEqual(a['max_simultaneous_observation_windows'],2)
         self.assertIsNone(a['proven_independent_sample_count'])
 
 
