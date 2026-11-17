@@ -17,6 +17,7 @@ from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import Request,build_opener,HTTPRedirectHandler
 import uuid
+from email.utils import parsedate_to_datetime
 from zipfile import ZipFile,ZIP_DEFLATED
 
 import p1_08c_registry as c
@@ -213,6 +214,19 @@ class Receiver:
     def processed_rows(self):
         self.verify();return [r for folder,_ in self._batches() for r in read(folder/'processed.json')]
 
+    def _rate_blocked(self,now):
+        for folder,_ in reversed(self._batches()):
+            for path in reversed(sorted(folder.glob('*.receipt.json'))):
+                meta=read(path)
+                if meta['http_status'] not in (418,429):continue
+                value=next((str(v) for k,v in meta['http_headers'].items() if k.lower()=='retry-after'),None)
+                if value is None:return True  # No invented cooldown: operator must review provider restriction.
+                try:
+                    until=c.timestamp(meta['system_received_at'])+int(value)*1000 if value.isdigit() else int(parsedate_to_datetime(value).timestamp()*1000)
+                except (ValueError,TypeError,OverflowError):return True
+                return now<until
+        return False
+
     @contextmanager
     def _writer(self):
         try:(self.root/'.receiver-lock').mkdir()
@@ -238,6 +252,7 @@ class Receiver:
                 return raw,meta
             server_ms=None
             if self.clock()<v['last_good_wall_ms']:flags.append('clock_rollback')
+            elif self._rate_blocked(self.clock()):flags.append('rate_limit_cooldown')
             else:
                 raw,meta=get('time');server_ms=server_reference(meta,raw)
                 if server_ms is None:flags.append('server_clock_unverified')

@@ -35,6 +35,8 @@ python p1_08d_receiver.py snapshot --root NEW_REAL_ROOT --out NEW_SNAPSHOT.zip
 
 每次collect有界：前後time、六個K線請求（每個limit3）、BTC/ETH各L1與depth20，共最多12個GET，遇429／418立即停止，不重試。未閉棒只在raw／處理清單，不進確認證據。每次collect是新的程序也能從同root接續；先全鏈／raw／語意核對再發網路，不能讓壞raw混入下一批。
 
+429／418的Retry-After也跨程序保留並遵守；無有效Retry-After時不猜等待秒數，留待人工檢查，不能靠立即重啟或還原舊副本繞過限制。此版沒有自動清除未知限流限制的API。
+
 第一次收到先前已閉的棒明標`bootstrap_backfill`。啟動後才閉但晚超5分鐘收到為`late_catchup`，其他為`post_start_observation`；這些分類不證明真實首次發布時間，也不是交易候選。超時、缺棒、未知或來源修訂不產生假的連續資料。只有limit3，長中斷可能留無法自動補齊的缺口；此版保留缺口，不假裝具有完整歷史補抓器。日後若另開補抓工具，receipt仍須是補抓當下。
 
 `projections`只提供已核對raw close與對應evidence／時間，不新增ATR、MA、RVOL或交易規則。最新poll失敗、來源修訂、缺棒、零量、啟動補抓、收集延遲及當下缺最新已收盤棒會影響data_quality_ready；舊資料不會因先前通過一次而永久就緒。無論資料旗標如何，本階段candidate_registration_enabled始終false。
