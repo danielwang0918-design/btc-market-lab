@@ -11,7 +11,7 @@ from pathlib import Path
 import subprocess
 from zipfile import ZipFile
 
-from p1_08c_registry import Registry,FRAMES,SYMBOLS,sha_file,sha_bytes,utc,load_json,timestamp
+from p1_08c_registry import Registry,FRAMES,SYMBOLS,CANDIDATE_KEYS,sha_file,sha_bytes,utc,load_json,timestamp
 
 BASE='330c87cc62252f8c1ee52756712954d5e0dfed30'
 SOURCE_SHA='75093e26e3dd7737d713037dd145edc5a425fae2b579d9558110b5afcab07305'
@@ -66,7 +66,7 @@ def run(out_dir,*,baseline_zip=None):
             quality=dict(data_gaps=[],delays=[],unknown_fields=['rvol20']),previous_candidate_sha256=None)
         record=r.register(c);registrations.append(record);checkpoints.append(r.checkpoint());latest[symbol]=record
     clock[0]=start+2*H+1000;e2=r.ingest(synthetic_candle('BTCUSDT',start+H))
-    c={k:v for k,v in latest['BTCUSDT']['payload'].items() if k in __import__('p1_08c_registry').CANDIDATE_KEYS}
+    c={k:v for k,v in latest['BTCUSDT']['payload'].items() if k in CANDIDATE_KEYS}
     c=deepcopy(c);c.update(confirmed_at=utc(start+2*H),state='confirmed',stance='long',observation_start_at=utc(start+3*H),
         previous_candidate_sha256=latest['BTCUSDT']['record_sha256'],evidence_ids=[inputs['BTCUSDT'],e2['record_sha256']])
     c['features']['last_close']=dict(value=101,known_at=utc(clock[0]),evidence_ids=[e2['record_sha256']],unknown_reason=None)

@@ -228,8 +228,8 @@ def candidate_payload(c,now,records,p,mode):
     expected=versions[-1]['record_sha256'] if versions else None
     if c['previous_candidate_sha256']!=expected:raise ValueError('Candidate duplicate or stale revision')
     q=deepcopy(c['quality'])
-    if any(r['source']['published_at'] is None for r in inputs) and 'source_publication_time_unknown' not in q['unknown_fields']:
-        q['unknown_fields'].append('source_publication_time_unknown')
+    missing={flag for r in inputs for flag in r['quality_flags'] if flag.endswith('_unknown')}
+    q['unknown_fields']+=sorted(missing-set(q['unknown_fields']))
     for f in sorted({r['timeframe'] for r in inputs}):
         local=[r for r in inputs if r['timeframe']==f]
         if len(local)>1 and not consecutive(local,f,1) and f not in q['data_gaps']:q['data_gaps'].append(f)
@@ -355,8 +355,10 @@ class Registry:
             with temp.open('xb') as stream:
                 stream.write(canonical(r)+b'\n');stream.flush();os.fsync(stream.fileno())
             os.chmod(temp,0o444)
-            if kind=='candidates' and self._now()>=timestamp(payload['observation_start_at']):
-                raise ValueError('Observation started before local sealing; do not commit')
+            if kind=='candidates':
+                seal_clock=self._now()
+                if seal_clock<now or seal_clock>=timestamp(payload['observation_start_at']):
+                    raise ValueError('Clock rollback or observation started before local sealing; do not commit')
             os.link(temp,file)  # Atomic, no replacement even if a destination appeared.
             fd=os.open(folder,os.O_RDONLY)
             try:os.fsync(fd)
@@ -368,6 +370,8 @@ class Registry:
     def _append(self,kind,value):
         with self._writer():
             records=self._records();now=self._now();initial=records[0]['payload'];p=initial['protocol']
+            if initial['writer_code_sha256']!=sha_file(Path(__file__)):
+                raise ValueError('Writer version changed; freeze a new protocol/registry')
             if now<timestamp(records[-1]['recorded_at']):raise ValueError('Writer clock rollback')
             if kind=='evidence':payload=evidence_payload(value,now,records)
             elif kind=='candidates':payload=candidate_payload(value,now,records,p,initial['mode'])
@@ -401,19 +405,30 @@ class Registry:
             independent_forward_evidence_claim=False,qualified_strategy_count=0)
 
     def audit(self):
-        records=self._records();p=records[0]['payload']['protocol'];first={}
+        records=self._records();p=records[0]['payload']['protocol'];first={};bounds={}
         for r in records:
-            if r['kind']=='candidates':first.setdefault(r['payload']['event_id'],r['payload'])
-        candidates=list(first.values());pairs=cross=0
+            if r['kind']=='candidates':
+                c=r['payload'];eid=c['event_id'];first.setdefault(eid,c)
+                op=timestamp(c['observation_start_at']);cl=op+max(p['horizons_hours'])*FRAMES['1h']
+                prior=bounds.get(eid,(op,cl));bounds[eid]=(min(prior[0],op),max(prior[1],cl))
+        candidates=list(first.values());pairs=cross=0;parents=list(range(len(candidates)));ticks=[]
+        def find(i):
+            while parents[i]!=i:i=parents[i]
+            return i
         for i,a in enumerate(candidates):
-            for b in candidates[i+1:]:
-                if max(timestamp(a['observation_start_at']),timestamp(b['observation_start_at']))<min(
-                    timestamp(a['observation_start_at'])+max(p['horizons_hours'])*FRAMES['1h'],
-                    timestamp(b['observation_start_at'])+max(p['horizons_hours'])*FRAMES['1h']):
-                    pairs+=1;cross+=a['symbol']!=b['symbol']
+            op,cl=bounds[a['event_id']];ticks.extend([(op,1),(cl,-1)])
+            for j in range(i+1,len(candidates)):
+                b=candidates[j];bop,bcl=bounds[b['event_id']]
+                if max(op,bop)<min(cl,bcl):
+                    pairs+=1;cross+=a['symbol']!=b['symbol'];parents[find(j)]=find(i)
+        simultaneous=peak=0
+        for _,change in sorted(ticks):simultaneous+=change;peak=max(peak,simultaneous)
         return dict(unique_events=len(first),candidate_versions=sum(r['kind']=='candidates' for r in records),
             btc_events=sum(c['symbol']=='BTCUSDT' for c in candidates),other_events=sum(c['symbol']!='BTCUSDT' for c in candidates),
             observation_overlap_pairs=pairs,cross_symbol_overlap_pairs=cross,
+            overlap_connected_components=len({find(i) for i in range(len(candidates))}),
+            max_simultaneous_observation_windows=peak,overlap_scope='conservative envelope of all versions and longest registered observation horizon; not account exposure',
+            by_arm={a:dict(registered_events=sum(c['arm']==a for c in candidates),eligible_events_verified=None) for a in p['arms']},
             nonempty_common_28day_blocks=len({(timestamp(c['observation_start_at'])-timestamp(p['study_start_at']))//(28*24*FRAMES['1h']) for c in candidates}),
             proven_independent_sample_count=None,operational_floor_met=False,
             reason='Planning only; no verified economic labels, no independent-sample or power claim')
