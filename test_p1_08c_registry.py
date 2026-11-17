@@ -209,6 +209,28 @@ class RegistryTests(unittest.TestCase):
         self.assertIn('quote_volume_unknown',self.e['payload']['quality_flags'])
         self.assertIn('source_market_event_time_unknown',self.e['payload']['quality_flags'])
 
+    def test_write_that_reaches_observation_start_is_not_committed(self):
+        c=self.candidate();before=self.r.verify()['records'];ticks=iter([self.t,T+2*H])
+        self.r.clock=lambda:next(ticks)
+        with self.assertRaises(ValueError):self.r.register(c)
+        self.assertEqual(self.r.verify()['records'],before)
+
+    def test_changed_first_record_universe_is_not_valid_even_with_new_hash(self):
+        file=self.root/'protocols'/'0000000001.json';r=json.loads(file.read_text())
+        r['payload']['allowed_timeframes']=['15m']
+        r['record_sha256']=registry.sha_bytes(registry.canonical({k:v for k,v in r.items() if k!='record_sha256'}))
+        # Remove the suffix to isolate validation of first-record metadata.
+        for f in (self.root/'evidence').glob('*.json'):f.unlink()
+        file.chmod(0o644);file.write_bytes(registry.canonical(r)+b'\n')
+        with self.assertRaises(ValueError):self.r.verify()
+
+    def test_label_with_cross_symbol_or_wrong_window_evidence_rejected(self):
+        c=self.register();ids=self.future_evidence()
+        other=self.r.ingest(candle(T+2*H,symbol='ETHUSDT'))
+        wrong=self.r.ingest(candle(T+H))
+        for rid in [other['record_sha256'],wrong['record_sha256']]:
+            with self.subTest(rid=rid),self.assertRaises(ValueError):self.r.label(self.label(c,[rid]+ids[1:]))
+
     def test_candidate_does_not_accept_outcome_fields(self):
         for key in ('mfe_R0','label_completed_at','exit_time','realized_net_R'):
             c=self.candidate();c[key]=1
