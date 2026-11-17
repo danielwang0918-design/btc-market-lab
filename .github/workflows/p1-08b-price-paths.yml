@@ -1,0 +1,120 @@
+name: P1-08B frozen price paths and effective movement
+on:
+  push:
+    branches: ["codex/p1-08b-price-paths"]
+    paths: ["p1_08b_*.py", "test_p1_08b_*.py", "P1_08B_*", ".github/workflows/p1-08b-price-paths.yml"]
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: p1-08b-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  diagnosis:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      MPLCONFIGDIR: /tmp/p1-08b-mpl
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install matplotlib==3.10.8 numpy==2.3.5 scipy==1.17.0 scikit-learn==1.8.0
+      - name: Verify preregistration and unchanged inherited code
+        run: |
+          set -euo pipefail
+          git show cf3af6f:P1_08B_PROTOCOL.json > /tmp/p1-08b-fixed.json
+          cmp /tmp/p1-08b-fixed.json P1_08B_PROTOCOL.json
+          git diff --quiet --diff-filter=DMRTUXB 973791ea5be0170a6b41edfeb9f6756426314539 -- .
+      - name: All Python tests with pinned dependencies
+        run: |
+          set -euo pipefail
+          mkdir -p research/p1_08b_evidence/inputs
+          python -m unittest -v 2>&1 | tee research/p1_08b_evidence/python-tests.log
+      - name: Exact frozen source only
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api repos/$GITHUB_REPOSITORY/actions/artifacts/14280058200/zip > research/p1_08b_evidence/inputs/p1-08a-source.zip
+      - name: Diagnose without strategy replay or new curves
+        run: |
+          python -u - <<'PY'
+          from pathlib import Path
+          import p1_portfolio,p1_stop_candidates,p1_07_signals,p1_07_study,p1_08a_study,p1_08b_study
+          def forbidden(*args,**kwargs):raise AssertionError('Strategy replay forbidden in P1-08B')
+          p1_portfolio.run_account=forbidden
+          p1_stop_candidates.ledger=forbidden
+          p1_stop_candidates.outcome_paths=forbidden
+          p1_07_signals.generate=forbidden
+          p1_07_study.run=forbidden
+          p1_08a_study.run=forbidden
+          p1_08b_study.run(Path('research/p1_08b_evidence/inputs/p1-08a-source.zip'),Path('research/p1_08b_evidence/results'))
+          PY
+      - name: Independent bounds, source, clocks and populations acceptance
+        run: |
+          python - <<'PY'
+          import csv,json,hashlib
+          from pathlib import Path
+          from zipfile import ZipFile
+          from decimal import Decimal as D
+          root=Path('research/p1_08b_evidence/results')
+          def rows(name):
+              with (root/name).open(encoding='utf-8-sig') as f:yield from csv.DictReader(f)
+          m=json.loads((root/'p1_08b_manifest.json').read_text())
+          assert m['source_accounts']==160 and m['source_actual_rows']==32232 and m['source_isolated_rows']==13548
+          assert m['source_output_hashes_verified']==17 and len(m['frozen_source_sha256'])==24 and m['raw_candles']==717638
+          assert m['unique_paths']==14524 and m['profile_mappings']==45780 and m['profile_count']==288
+          assert m['new_capital_curves']==m['strategy_replays']==0
+          assert not m['parameter_optimization'] and not m['new_OOS'] and not m['live_execution']
+          for name,digest in m['output_sha256'].items():assert hashlib.sha256((root/name).read_bytes()).hexdigest()==digest,name
+          with ZipFile('research/p1_08b_evidence/inputs/p1-08a-source.zip') as z:
+              assert z.read('results/archived_accounts.csv')==(root/'source_accounts.csv').read_bytes()
+          attribution=list(rows('exit_cash_attribution.csv'))
+          for account in rows('source_accounts.csv'):
+              local=[r for r in attribution if all(r[k]==account[k] for k in ('model','period','scenario','policy'))]
+              assert sum(int(r['n']) for r in local)==int(account['trade_count'])
+              assert abs(D(1000)+sum(D(r['net_pnl_USDT']) for r in local)-D(account['final_equity_USDT']))<D('1e-10')
+          fixed_count=0;keys=set()
+          for r in rows('fixed_horizon_labels.csv'):
+              fixed_count+=1;h=int(r['requested_horizon_hours']);assert h in (6,12,24,48,72)
+              key=(r['path_id'],r['path_scope'],h);assert key not in keys;keys.add(key)
+              assert D(r['R0_price'])>0 and D(r['R_model_per_unit'])>0
+              if r['path_scope']=='held_prefix':
+                  assert r['contains_post_exit_prices']=='False' and int(r['observed_end_ms'])<=int(r['exit_time_ms'])
+              if r['complete']=='True':
+                  assert D(r['mfe_R0_upper'])>=D(r['mfe_R0_lower'])>=0
+                  assert D(r['mae_R0_upper'])>=D(r['mae_R0_lower'])>=0
+              else:assert r['mfe_R0_upper']==r['mae_R0_upper']==''
+          assert fixed_count==m['fixed_horizon_label_rows']==145240
+          features=list(rows('feature_snapshots.csv'));assert len(features)==28829
+          forbidden={'net_pnl_usdt','r_multiple','exit_time_ms','raw_exit','source_final_status','MFE','MAE'}
+          assert not forbidden.intersection(features[0])
+          for r in features:
+              t=int(r['decision_time_ms'])
+              if r['break_available_ms']:assert int(r['break_available_ms'])<=t
+              if r['prebreak_available_ms']:assert int(r['prebreak_available_ms'])<=int(r['break_open_ms'])
+              for frame in ('1h','4h','1d'):
+                  if r['reference_close_ms_'+frame]:assert int(r['reference_close_ms_'+frame])<=t
+          target=[r for r in rows('t20_cont_timeout_diagnosis.csv') if (r['model'],r['period'],r['scenario'])==('fractional_spot','opened_test','source_stop_first')]
+          assert len(target)==28 and sum(D(r['archived_net_R'])<0 for r in target)==18
+          assert all(r['path_scope']=='full_original_hold' and r['contains_post_exit_prices']=='False' for r in target)
+          assert len(list(rows('fixed_hypothesis_contrasts.csv')))==72
+          (root/'acceptance.json').write_text(json.dumps(dict(frozen_source_and_outputs_verified=True,
+              original_accounts_byte_identical=True,three_path_scopes_separated=True,bounds_and_feature_clocks_verified=True,
+              original_test_timeouts=28,original_test_timeout_losses=18,strategy_entry_points_disabled=True,
+              strategy_replays=0,new_curves=0,new_OOS=False,live_execution=False),indent=2)+'\n')
+          PY
+      - name: Publish Chinese acceptance and methods
+        run: |
+          cp AGENTS.md P1_08B_*.md P1_08B_*.json research/p1_08b_evidence/
+          cat research/p1_08b_evidence/results/P1_08B_RESULT_ZH.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: p1-08b-price-paths-${{ github.run_id }}
+          path: research/p1_08b_evidence/
+          retention-days: 45
+          if-no-files-found: error
