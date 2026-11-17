@@ -107,6 +107,20 @@ class ReceiverTests(unittest.TestCase):
         self.assertEqual(len(self.calls),2)
         self.assertEqual(self.r.verify()['normalized_evidence'],0)
 
+    def test_rate_limit_is_not_retried_by_immediate_restart(self):
+        self.failure='429';self.collect();n=len(self.calls);self.now+=1000
+        self.r=mod.Receiver(self.root,clock=lambda:self.now,opener=self.open_it)
+        result=self.collect()
+        self.assertEqual(len(self.calls),n);self.assertIn('rate_limit_cooldown',result['quality_flags'])
+
+    def test_explicit_retry_after_is_honored_across_processes(self):
+        original=self.open_it
+        def limited(req,timeout):
+            if '/klines?' in req.full_url:raise HTTPError(req.full_url,429,'fixture',{'Retry-After':'60'},io.BytesIO(b'{}'))
+            return original(req,timeout)
+        self.r.opener=limited;self.collect();self.now+=61000;self.r.opener=self.open_it
+        self.assertEqual(self.collect()['new_evidence'],2)
+
     def test_gap_is_not_filled_or_called_contiguous(self):
         self.collect();self.now=T+6*H+10000;self.rows=[row(T+4*H),row(T+5*H),row(T+6*H)]
         result=self.collect();self.assertGreater(result['gap_intervals'],0)
