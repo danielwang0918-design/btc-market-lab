@@ -220,11 +220,15 @@ def candidate_payload(c,now,records,p,mode):
     exact(c['quality'],{'data_gaps','delays','unknown_fields'})
     for value in c['quality'].values():strings(value)
     text(c['market_event_key'])
-    identity=dict(study_key=p['study_key'],rule=p['rule'],symbol=symbol,timeframe=frame,formed_at=utc(formed),market_event_key=c['market_event_key'])
+    identity=dict(protocol_sha256=sha_bytes(canonical(p)),study_key=p['study_key'],rule=p['rule'],symbol=symbol,timeframe=frame,formed_at=utc(formed),market_event_key=c['market_event_key'])
     event_id=sha_bytes(canonical(identity))
     versions=[r for r in records if r['kind']=='candidates' and r['payload']['event_id']==event_id]
     expected=versions[-1]['record_sha256'] if versions else None
     if c['previous_candidate_sha256']!=expected:raise ValueError('Candidate duplicate or stale revision')
+    if versions:
+        old=versions[-1]['payload']
+        if c['arm']!=old['arm'] or old['state']=='invalid' or (old['state']=='confirmed' and c['state']!='invalid'):
+            raise ValueError('Arm/confirmed direction is frozen; invalidation only, no retrospective reassignment')
     q=deepcopy(c['quality'])
     missing={flag for r in inputs for flag in r['quality_flags'] if flag.endswith('_unknown')}
     q['unknown_fields']+=sorted(missing-set(q['unknown_fields']))

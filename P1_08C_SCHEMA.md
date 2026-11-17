@@ -50,7 +50,7 @@ features 是事前白名單，每欄必有 definition、code_sha256、dtype（nu
 | quality | data_gaps／delays／unknown_fields字串清單；不偷偷補齊缺值 |
 | previous_candidate_sha256 | 首版null；更新必須引用同event_id最新版本，不接受過期分叉 |
 
-系統新增 event_id、revision、registered_at、data_available_at、registration_delay_ms、source_rule、label_names／horizons、research_only、mode、forward_status及 feature_calculation_verified=false。event_id由研究鍵、來源規則、market event key、幣種、週期與正規化形成時間計算；revision不改event_id。source key本身仍需上游避免重複命名；不是相互獨立市場事件的證明。
+系統新增 event_id、revision、registered_at、data_available_at、registration_delay_ms、source_rule、label_names／horizons、research_only、mode、forward_status及 feature_calculation_verified=false。event_id由完整protocol SHA256、研究鍵、來源規則、market event key、幣種、週期與正規化形成時間計算；revision不改event_id。研究臂不可在版本間改派；confirmed只能追加invalid，不能翻轉原方向或事後改確認，invalid不能復活。source key本身仍需上游避免重複命名；不是相互獨立市場事件的證明。
 
 新增確認不能改舊pending；新版本重新凍結自己的未來研究窗。已登記舊窗口及觀望狀態保留。沒有策略證據時保持watch，不補造entry/SL/TP。候選並非可交易訊號，本層不新增訊號生成器。
 
