@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter
+from calendar import monthrange
 from contextlib import contextmanager
 from copy import deepcopy
 from datetime import datetime, timezone
@@ -95,8 +96,7 @@ def number(value):
 def add_months(ms,months):
     dt=datetime.fromtimestamp(ms/1000,timezone.utc)
     y,m=divmod(dt.year*12+dt.month-1+months,12)
-    # The study schedule uses a first-of-month start to make month review exact.
-    return int(dt.replace(year=y,month=m+1).timestamp()*1000)
+    return int(dt.replace(year=y,month=m+1,day=min(dt.day,monthrange(y,m+1)[1])).timestamp()*1000)
 
 
 def validate_protocol(p,now,mode):
@@ -106,8 +106,6 @@ def validate_protocol(p,now,mode):
     exact(p['rule'],{'id','version','code_sha256'});text(p['rule']['id']);text(p['rule']['version']);digest(p['rule']['code_sha256'])
     start=timestamp(p['study_start_at'])
     if mode!='historical_import' and start<=now:raise ValueError('Study start must follow protocol freeze')
-    dt=datetime.fromtimestamp(start/1000,timezone.utc)
-    if (dt.day,dt.hour,dt.minute,dt.second,dt.microsecond)!=(1,0,0,0,0):raise ValueError('Study starts at a UTC month boundary')
     reviews=[timestamp(x) for x in p['review_dates']]
     if not reviews or reviews!=sorted(set(reviews)) or reviews[0]<=start or reviews[-1]<add_months(start,24):
         raise ValueError('Fixed review dates must cover at least 24 calendar months')
@@ -355,9 +353,12 @@ class Registry:
             with temp.open('xb') as stream:
                 stream.write(canonical(r)+b'\n');stream.flush();os.fsync(stream.fileno())
             os.chmod(temp,0o444)
+            seal_clock=self._now()
+            if seal_clock<now:raise ValueError('Writer clock rolled back during sealing')
+            if kind=='protocols' and payload['mode']!='historical_import' and seal_clock>=timestamp(payload['protocol']['study_start_at']):
+                raise ValueError('Study started before protocol could be locally sealed')
             if kind=='candidates':
-                seal_clock=self._now()
-                if seal_clock<now or seal_clock>=timestamp(payload['observation_start_at']):
+                if seal_clock>=timestamp(payload['observation_start_at']):
                     raise ValueError('Clock rollback or observation started before local sealing; do not commit')
             os.link(temp,file)  # Atomic, no replacement even if a destination appeared.
             fd=os.open(folder,os.O_RDONLY)

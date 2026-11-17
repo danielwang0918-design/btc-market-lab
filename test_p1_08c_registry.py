@@ -167,6 +167,27 @@ class RegistryTests(unittest.TestCase):
         with self.assertRaises(ValueError):self.r.register(self.candidate(previous_candidate_sha256='b'*64))
         self.assertEqual(c['payload']['revision'],1)
 
+    def test_event_identity_includes_full_frozen_protocol(self):
+        p=protocol();p['hypothesis']['statement']='Different synthetic hypothesis, not the same study version'
+        self.t=T-1;r=registry.Registry.create(self.root.parent/'different-protocol',p,mode='synthetic',clock=lambda:self.t)
+        self.t=T+H+1000;e=r.ingest(candle())
+        a=self.register();c=self.candidate(evidence_ids=[e['record_sha256']])
+        c['features']['last_close']['evidence_ids']=[e['record_sha256']]
+        b=r.register(c)
+        self.assertNotEqual(a['payload']['event_id'],b['payload']['event_id'])
+
+    def test_confirmed_direction_cannot_be_rewritten_by_revision(self):
+        a=self.register()
+        with self.assertRaises(ValueError):self.r.register(self.candidate(stance='short',previous_candidate_sha256=a['record_sha256']))
+
+    def test_revisions_cannot_switch_research_arm(self):
+        p=protocol();p['arms']=['a','b'];self.t=T-1
+        r=registry.Registry.create(self.root.parent/'two-arms',p,mode='synthetic',clock=lambda:self.t)
+        self.t=T+H+1000;e=r.ingest(candle());c=self.candidate(arm='a',evidence_ids=[e['record_sha256']])
+        c['features']['last_close']['evidence_ids']=[e['record_sha256']]
+        a=r.register(c);c.update(arm='b',previous_candidate_sha256=a['record_sha256'])
+        with self.assertRaises(ValueError):r.register(c)
+
     def test_feature_future_unknown_and_result_injection_rejected(self):
         for name,value in [('mfe_R0',1),('final_pnl',1),('source_final_status','win')]:
             c=self.candidate();c['features'][name]={'value':value}

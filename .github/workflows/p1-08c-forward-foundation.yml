@@ -1,0 +1,110 @@
+name: P1-08C causal forward research foundation
+on:
+  push:
+    branches: ["codex/p1-08c-forward-foundation"]
+    paths: ["p1_08c_*.py", "test_p1_08c_*.py", "P1_08C_*", ".github/workflows/p1-08c-forward-foundation.yml"]
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: p1-08c-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  foundation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      MPLCONFIGDIR: /tmp/p1-08c-mpl
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install matplotlib==3.10.8 numpy==2.3.5 scipy==1.17.0 scikit-learn==1.8.0
+      - name: Fixed infrastructure scope and immutable inherited files
+        run: |
+          set -euo pipefail
+          git show 8a8caef:P1_08C_PLAN.json > /tmp/p1-08c-fixed-plan.json
+          cmp /tmp/p1-08c-fixed-plan.json P1_08C_PLAN.json
+          git diff --quiet --diff-filter=DMRTUXB 330c87cc62252f8c1ee52756712954d5e0dfed30 -- .
+      - name: Complete Python suite with pinned dependencies
+        run: |
+          set -euo pipefail
+          mkdir -p research/p1_08c_evidence/inputs
+          python -m unittest -v 2>&1 | tee research/p1_08c_evidence/python-tests.log
+      - name: Read exact frozen P1-08B artifact without rerunning it
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api repos/$GITHUB_REPOSITORY/actions/artifacts/14286501992/zip > research/p1_08c_evidence/inputs/p1-08b-source.zip
+      - name: Synthetic registration acceptance only, old engines disabled
+        run: |
+          python -u - <<'PY'
+          from pathlib import Path
+          import urllib.request,p1_portfolio,p1_stop_candidates,p1_07_signals,p1_07_study,p1_08a_study,p1_08b_study,p1_08c_demo
+          def forbidden(*args,**kwargs):raise AssertionError('No strategy replay or network capture in synthetic P1-08C acceptance')
+          urllib.request.urlopen=forbidden
+          p1_portfolio.run_account=forbidden
+          p1_stop_candidates.ledger=forbidden
+          p1_stop_candidates.outcome_paths=forbidden
+          p1_07_signals.generate=forbidden
+          p1_07_study.run=forbidden
+          p1_08a_study.run=forbidden
+          p1_08b_study.run=forbidden
+          p1_08c_demo.run(Path('research/p1_08c_evidence/results'),baseline_zip=Path('research/p1_08c_evidence/inputs/p1-08b-source.zip'))
+          PY
+      - name: Independent time, separation, source and integrity checks
+        run: |
+          python - <<'PY'
+          import json,hashlib
+          from pathlib import Path
+          from p1_08c_registry import Registry,timestamp
+          root=Path('research/p1_08c_evidence/results')
+          m=json.loads((root/'p1_08c_manifest.json').read_text())
+          assert m['synthetic_only'] and m['real_forward_candidates']==m['qualified_strategy_count']==m['new_backtests']==m['financial_changes']==0
+          assert m['unique_events']==8 and m['candidate_versions']==9 and m['complete_labels']==6 and m['incomplete_labels']==2
+          assert m['source_baseline']['source_accounts']==160 and m['source_baseline']['output_hashes_verified']==24
+          assert m['source_baseline']['frozen_files']==24 and m['source_baseline']['frozen_candles']==717638
+          for name,digest in m['output_sha256'].items():assert hashlib.sha256((root/name).read_bytes()).hexdigest()==digest,name
+          r=Registry(root/'synthetic_registry');checkpoints=json.loads((root/'registration_checkpoints.json').read_text())
+          for cp in checkpoints:assert r.verify(anchor=cp)['anchor_consistent']
+          for file in (root/'synthetic_registry'/'candidates').glob('*.json'):
+              rec=json.loads(file.read_text());c=rec['payload']
+              assert c['mode']=='synthetic' and c['forward_status']=='not_forward_evidence'
+              assert timestamp(c['formed_at'])<=timestamp(c['data_available_at'])<=timestamp(c['registered_at'])<timestamp(c['observation_start_at'])
+              assert not {'values','exit_time','realized_net_R','label_completed_at'}.intersection(c)
+              if c['state']=='pending':assert c['stance']=='watch' and c['confirmed_at'] is None
+          for file in (root/'synthetic_registry'/'labels').glob('*.json'):
+              x=json.loads(file.read_text())['payload']
+              assert timestamp(x['label_completed_at'])>=timestamp(x['observation_end_at'])
+              assert x['intrabar_order']=='unknown' and not x['calculation_verified']
+              if x['status']=='incomplete':assert all(v is None for v in x['values'].values())
+          a=r.audit();assert a['cross_symbol_overlap_pairs']==28 and a['overlap_connected_components']==1
+          assert a['proven_independent_sample_count'] is None and not a['operational_floor_met']
+          (root/'acceptance.json').write_text(json.dumps(dict(synthetic_only=True,causal_times_verified=True,
+              candidate_result_separation_verified=True,immutable_baseline_verified=True,external_timestamp_attestation_verified=False,
+              independent_forward_evidence=0,new_strategies=0,source_financial_changes=0),indent=2)+'\n')
+          PY
+      - name: Publish complete research package and file inventory
+        run: |
+          cp AGENTS.md P1_08C_* p1_08c_*.py test_p1_08c_*.py research/p1_08c_evidence/
+          cp .github/workflows/p1-08c-forward-foundation.yml research/p1_08c_evidence/workflow.yml
+          git diff --name-status 330c87cc62252f8c1ee52756712954d5e0dfed30 > research/p1_08c_evidence/changed-files.txt
+          python - <<'PY'
+          import hashlib,json,os
+          from pathlib import Path
+          root=Path('research/p1_08c_evidence')
+          m=dict(commit=os.environ['GITHUB_SHA'],run_id=os.environ['GITHUB_RUN_ID'],
+              files_sha256={str(p.relative_to(root)):hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(root.rglob('*')) if p.is_file()})
+          (root/'artifact_manifest.json').write_text(json.dumps(m,indent=2)+'\n')
+          PY
+          cat P1_08C_ACCEPTANCE.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: p1-08c-forward-foundation-${{ github.run_id }}
+          path: research/p1_08c_evidence/
+          retention-days: 45
+          if-no-files-found: error

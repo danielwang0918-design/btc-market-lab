@@ -19,7 +19,7 @@
 
 payload 保存 protocol、mode、registry_id、frozen_at、writer_code_sha256、固定八幣及三週期。mode 為 synthetic、prospective 或 historical_import，之後不能切換；注入時鐘只允許 synthetic。所有輸出永不自行宣稱 independent_forward_evidence。
 
-protocol 必填：study_key；hypothesis 的 id／statement／falsification；rule 的 id／version／code_sha256；study_start_at（月初 UTC，晚於凍結，歷史匯入另標）；review_dates（固定日曆，至少涵蓋24個月）；arms；features；label_names；label_calculator_sha256；horizons_hours（固定、唯一1～168整小時）；observation_anchor；costs。
+protocol 必填：study_key；hypothesis 的 id／statement／falsification；rule 的 id／version／code_sha256；study_start_at（UTC，晚於凍結，歷史匯入另標，不必等月初）；review_dates（固定日曆，至少涵蓋24個月）；arms；features；label_names；label_calculator_sha256；horizons_hours（固定、唯一1～168整小時）；observation_anchor；costs。
 
 features 是事前白名單，每欄必有 definition、code_sha256、dtype（number/category/boolean）、lookback_bars（例如 `{"1h":21}`）。禁止明確的事後欄位名稱；這不能代替對外部計算程式的語意審查。costs 固定10bps單邊費用、5/15bps滑價、1000USDT及0.02風險預算。P1-08C 的已提交範例只用於合成測試，不是正式假說。
 
