@@ -93,6 +93,37 @@ class OpsTests(unittest.TestCase):
         self.assertIn('low_disk',kinds);self.assertIn('unresolved_local_incidents',kinds)
         self.assertFalse(r['continue_conditions_met'])
 
+    def test_monitor_exposes_source_http_failure_and_stale_backup(self):
+        import p1_08e_monitor as monitor
+        self.case.failure='network';self.o.cycle(expected_head=self.o.head());self.case.now+=7200001
+        r=monitor.daily_report(self.o,'2030-01-01')
+        kinds=[x['kind'] for x in r['alerts']]
+        self.assertIn('source_http_error',kinds);self.assertIn('backup_stale',kinds)
+
+    def test_daily_report_is_retained_without_additional_market_calls(self):
+        head=self.o.head();n=len(self.case.calls)
+        published,report=self.o.record_daily_report(expected_head=head,day='2030-01-01')
+        self.assertEqual(len(self.case.calls),n)
+        self.assertEqual(self.o.head(),published);self.assertEqual(report['seven_day']['status'],'not_started')
+        self.assertEqual(list((self.root/'state/events').glob('*.json'))[-1].name,'0000000001.json')
+
+    def test_two_racing_publishers_have_only_one_collection_lease(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from threading import Barrier
+        head=self.o.head();other=ops.Supervisor.restore(self.base/'competitor',remote=str(self.remote),branch=self.o.branch,
+            expected_head=head,mode='synthetic',clock=self.clock,opener=self.case.open_it)
+        barrier=Barrier(2);n=len(self.case.calls)
+        def racing(instance):
+            original=instance.archive.git
+            def intercepted(args,**kwargs):
+                if args[0]=='push':barrier.wait(timeout=15)
+                return original(args,**kwargs)
+            with patch.object(instance.archive,'git',side_effect=intercepted):
+                try:return instance.reserve(expected_head=head)
+                except ValueError:return None
+        with ThreadPoolExecutor(max_workers=2) as pool:results=list(pool.map(racing,[self.o,other]))
+        self.assertEqual(sum(x is not None for x in results),1);self.assertEqual(len(self.case.calls),n)
+
     def test_pilot_requires_explicit_durable_host_and_is_not_auto_started(self):
         with self.assertRaises(ValueError):self.o.start_trial(expected_head=self.o.head(),operator_id='fixture',durable_host='test',persistence_confirmed=False)
         self.assertEqual(self.o.status()['seven_day_status'],'not_started')
