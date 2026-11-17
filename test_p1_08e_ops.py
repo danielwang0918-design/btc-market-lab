@@ -71,6 +71,46 @@ class OpsTests(unittest.TestCase):
         with self.assertRaises(ValueError):self.o.cycle(expected_head=self.o.head())
         self.assertEqual(len(self.case.calls),n)
 
+    def test_unpublished_local_receiver_advance_cannot_be_silently_adopted(self):
+        head=self.o.head();self.case.now+=1000;self.o.receiver().collect(include_liquidity=False);n=len(self.case.calls)
+        with self.assertRaises(ValueError):self.o.cycle(expected_head=head)
+        self.assertEqual(len(self.case.calls),n)
+
+    def test_monitor_survives_corrupt_raw_and_does_not_report_zero_as_known(self):
+        import p1_08e_monitor as monitor
+        f=next((self.root/'state/receiver/batches').glob('*/*.body'));f.chmod(0o644);f.write_bytes(b'corrupt')
+        r=monitor.daily_report(self.o,'2030-01-01')
+        self.assertFalse(r['continue_conditions_met'])
+        self.assertIn('raw_integrity_mismatch',[x['kind'] for x in r['alerts']])
+        self.assertIsNone(r['feeds'][0]['confirmed'])
+
+    def test_monitor_exposes_low_disk_and_unresolved_incidents(self):
+        import p1_08e_monitor as monitor
+        self.o.diagnostic('backup_failed','synthetic failure')
+        with patch.object(ops.shutil,'disk_usage',return_value=type('Disk',(),{'free':1})()):
+            r=monitor.daily_report(self.o,'2030-01-01')
+        kinds=[x['kind'] for x in r['alerts']]
+        self.assertIn('low_disk',kinds);self.assertIn('unresolved_local_incidents',kinds)
+        self.assertFalse(r['continue_conditions_met'])
+
+    def test_pilot_requires_explicit_durable_host_and_is_not_auto_started(self):
+        with self.assertRaises(ValueError):self.o.start_trial(expected_head=self.o.head(),operator_id='fixture',durable_host='test',persistence_confirmed=False)
+        self.assertEqual(self.o.status()['seven_day_status'],'not_started')
+
+    def test_explicit_activation_uses_actual_clock_not_old_market_time(self):
+        head=self.o.head();self.case.now+=1000
+        self.o.start_trial(expected_head=head,operator_id='SYNTHETIC',durable_host='fixture-only',persistence_confirmed=True)
+        cat=self.o.archive.catalog(self.o.head())
+        self.assertEqual(cat['trial_started_at'],fixture.utc(self.case.now))
+        self.assertFalse(self.o.status()['level2_pass'])
+
+    def test_live_local_pid_cannot_be_claimed_dead_in_real_recovery(self):
+        import os,socket
+        self.o.local['mode']='real_public'
+        fake=dict(lease=dict(pid=os.getpid(),host=socket.gethostname()))
+        with patch.object(self.o,'_guard',return_value=fake),patch.object(self.o,'_finish',return_value=('unexpected',{})):
+            with self.assertRaises(ValueError):self.o.recover_stopped(expected_head='a'*40,death_evidence=dict(process_dead=True,returncode=-9,pid=os.getpid()))
+
     def test_unreviewed_http_failure_is_archived_but_stops_continuation(self):
         self.case.failure='network';head=self.o.head()
         result=self.o.cycle(expected_head=head)
