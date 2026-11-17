@@ -84,11 +84,15 @@ jobs:
         run: |
           python p1_08d_retention.py bundle --root research/real_receiver --out research/capture-bundle
           python - <<'PY'
-          from p1_08d_receiver import Receiver,write
+          from p1_08d_receiver import Receiver,write,read
           r=Receiver('research/real_receiver');v=r.verify()
           rows=[x for x in r.processed_rows() if x['status']=='new']
           feeds={(x['symbol'],x['timeframe']) for x in rows}
-          ok=all((s,'1h') in feeds for s in ('BTCUSDT','ETHUSDT'))
+          folder,manifest=r._batches()[-1]
+          current=read(folder/'summary.json')
+          current_feeds={(x.get('symbol'),x.get('timeframe')) for x in read(folder/'processed.json') if x['status'] in ('new','duplicate')}
+          ok=(current['status']=='ok' and current['clock_context_verified'] and current['failed_requests']==0
+              and all((s,'1h') in current_feeds for s in ('BTCUSDT','ETHUSDT')))
           write('research/real-reception-acceptance.json',dict(actual_BTC_ETH_closed1h_received=ok,
               raw_and_registry_hashes_verified=True,external_timestamp_attestation_verified=False,
               candidates=0,active_trading_hypotheses=0,long_term_operational_stability_proven=False))

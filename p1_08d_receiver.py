@@ -238,6 +238,7 @@ class Receiver:
         with self._writer():
             v=self.verify()
             history=self.processed_rows()
+            rate_blocked=self._rate_blocked(self.clock())
             if self.contract['receiver_code_sha256']!=c.sha_file(Path(__file__)):raise ValueError('Receiver writer version drift; freeze a new receiver version')
             stage=self.root/('.pending-'+uuid.uuid4().hex);stage.mkdir();items=[];metas=[];flags=[]
             summary=dict(status='ok',new_evidence=0,duplicate_rows=0,revision_rows=0,open_rows=0,invalid_rows=0,
@@ -252,7 +253,7 @@ class Receiver:
                 return raw,meta
             server_ms=None
             if self.clock()<v['last_good_wall_ms']:flags.append('clock_rollback')
-            elif self._rate_blocked(self.clock()):flags.append('rate_limit_cooldown')
+            elif rate_blocked:flags.append('rate_limit_cooldown')
             else:
                 raw,meta=get('time');server_ms=server_reference(meta,raw)
                 if server_ms is None:flags.append('server_clock_unverified')
