@@ -123,6 +123,8 @@ T20_CONT原eligible long306筆中，固定24h可評估305筆，壓縮另有1筆�
 
 測試先於實作提交：入場同棒的限價S_ATR1不能把全棒高點算已持有；棒內退出高點可能在exit後；open exit不讀該小時之後高低；同棒TP/SL及極值未知；缺棒／零量無真上界；兩種R不混；形成前ATR及成本不用突破後量價；跨午夜仍用突破日的20D參照。零交易profile讀取缺side曾由失敗測試重現後修正；沒有改來源或績效。
 
+最後稽核另以失敗測試確認：若入場同棒已退出，根本沒有可確認持有的hourly close，不能僅靠entry/exit兩個模型價便填close效率1。已改為未知並另列各metric有效樣本分母；MFE／MAE、原退出、兩個假說判定及28筆到期核心結果均不受影響。
+
 UTC換日另重現一項**既有P0測試fixture**問題：原`test_daily_future_rejected_before_fetch`把固定2026-11-17當未來，真實時鐘到該日後斷言失效。所有P0程式／Genesis／原測試檔保持逐字不變；新`test_p1_08b_clock_fixture.py`只在該測試呼叫內把clock固定在原START前一秒，保留原斷言，結束即還原，另驗證cutoff等於now應可通過。這只在完整unit-test discovery生效，研究程式不import測試，沒有改生產時鐘或捕獲新市場資料。直接單跑未載入此fixture的原P0舊測試仍依真實日期，後續若要獨立維護應另案處理，不能說正式P0規則有錯。
 
 CI要求protocol與`cf3af6f`逐字相同、相對基準所有繼承檔案不變，並停用run_account、ledger、outcome_paths及舊研究run／訊號generate入口。新資金曲線0、策略重播0；原帳戶摘要逐字一致。所有原始source CSV在輸入ZIP內，source與新資料／程式／輸出hash由`p1_08b_manifest.json`保存。

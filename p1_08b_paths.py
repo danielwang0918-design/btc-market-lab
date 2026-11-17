@@ -85,7 +85,7 @@ def analyze(row,bars,horizon_hours=None,tape=False,cutoff=money.END):
     terminal=[] if endpoint is None else [endpoint]
     sequence=[e]+closes+terminal
     variation=sum(abs(b-a) for a,b in zip(sequence,sequence[1:]))
-    er=abs(sequence[-1]-e)/variation if variation and complete else D(0) if complete else None
+    er=(abs(sequence[-1]-e)/variation if variation else D(0)) if complete and closes else None
     near=sum(abs(p-e)<=r0/2 for p in closes)/len(closes) if closes and complete else None
     levels={f'favorable_{x}R0':(D(x)*r0,False) for x in ('0.5','1','2')}
     be=break_even(e,row['side'],slip)

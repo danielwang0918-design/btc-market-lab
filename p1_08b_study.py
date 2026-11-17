@@ -62,6 +62,8 @@ def correlation(a,b):
 def summarize(labels):
     valid=[r for r in labels if r['complete']];n=len(valid)
     result=dict(n=len(labels),n_complete=n,n_incomplete=len(labels)-n,small_sample=n<30,
+        n_close_efficiency_defined=sum(r['close_efficiency_proxy'] is not None for r in valid),
+        n_cost_ratio_defined=sum(r['cost_over_mfe_lower'] is not None for r in valid),
         n_early_exit=sum(r['early_exit_capped'] for r in labels),n_post_exit_tape=sum(r['contains_post_exit_prices'] for r in labels),
         n_entry_clock_proxy=sum(r['entry_bar_uncertain'] for r in labels),n_exit_bar_unknown=sum(r['exit_bar_uncertain'] for r in labels),
         n_right_censored=sum(r['right_censored'] for r in labels),
