@@ -4,14 +4,14 @@ from pathlib import Path
 import tempfile
 import unittest
 from zipfile import ZipFile
-from test_p1_08d_receiver import ReceiverTests
+import test_p1_08d_receiver as fixture
 from p1_08c_registry import sha_file
 import p1_08d_retention as mod
 
 
 class RetentionTests(unittest.TestCase):
     def setUp(self):
-        self.case=ReceiverTests('test_closed_evidence_and_raw_receipt_link_to_original_registry')
+        self.case=fixture.ReceiverTests('test_closed_evidence_and_raw_receipt_link_to_original_registry')
         self.case.setUp();self.addCleanup(self.case.doCleanups);self.case.collect()
         self.root=self.case.root.parent;self.bundle=self.root/'bundle';mod.publish_bundle(self.case.r,self.bundle,context={'commit':'c'*40,'run_id':'123','run_attempt':'1'})
         self.archive=self.root/'github-artifact.zip'
