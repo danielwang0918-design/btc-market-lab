@@ -1,0 +1,119 @@
+#!/usr/bin/env python3
+"""Honest UTC calendar denominators and operations reporting; no returns."""
+from __future__ import annotations
+import argparse
+from datetime import datetime,timezone
+import json
+from pathlib import Path
+from p1_08c_registry import FRAMES,utc,timestamp,system_ms
+
+H=FRAMES['1h'];DAY=24*H
+
+
+def expected_closes(start,end,frame):
+    step=FRAMES[frame]
+    return list(range((start//step+1)*step,(end//step)*step+1,step)) if end>start else []
+
+
+def outage_closes(start,end,frame):return expected_closes(start,end,frame)
+
+
+def seven_day_status(start,asof):
+    start=timestamp(start) if isinstance(start,str) else start
+    elapsed=max(0,asof-start) if start is not None else 0
+    return dict(status='not_started' if start is None else ('in_progress' if elapsed<7*DAY else 'awaiting_full_evidence_review'),
+        elapsed_ms=elapsed,elapsed_168h=start is not None and elapsed>=7*DAY,level2_pass=False,
+        reason='Real duration is necessary; seven daily records, backups and gap/recovery review are also required')
+
+
+def feed_report(rows,symbol,frame,start,end,asof):
+    expected=expected_closes(start,min(end,asof),frame);expected_set=set(expected);due={t for t in expected if t+300000<=asof}
+    confirmed={};duplicates=revisions=0
+    for r in rows:
+        if r.get('symbol')!=symbol or r.get('timeframe')!=frame or r.get('close_exclusive_ms') not in expected_set:continue
+        received=timestamp(r['wire_received_at'])
+        if received>asof:continue
+        if r['status']=='new':confirmed.setdefault(r['close_exclusive_ms'],received)
+        if r['status']=='duplicate':duplicates+=1
+        if r['status']=='source_revision':revisions+=1
+    ontime={cl for cl,received in confirmed.items() if cl<=received<=cl+300000}
+    late={cl for cl,received in confirmed.items() if received>cl+300000}
+    return dict(symbol=symbol,timeframe=frame,expected=len(expected),due=len(due),confirmed=len(confirmed),
+        missing_due=len(due-set(confirmed)),pending_grace=len(expected_set-due-set(confirmed)),late=len(late),
+        duplicates=duplicates,revisions=revisions,on_time_success_rate=len(ontime&due)/len(due) if due else None,
+        receipt_success_rate=len(set(confirmed)&due)/len(due) if due else None,
+        missing_close_times_UTC=[utc(t) for t in sorted(due-set(confirmed))])
+
+
+def daily_report(supervisor,day,*,asof=None):
+    now=supervisor.clock() if asof is None else asof
+    dt=datetime.strptime(day,'%Y-%m-%d').replace(tzinfo=timezone.utc);begin=int(dt.timestamp()*1000)
+    if begin>now:raise ValueError('No invented report for a future UTC day')
+    head=supervisor.head();cat=supervisor.archive.catalog(head);config=__import__('p1_08d_receiver').read(supervisor.root/'state/config.json')
+    start=timestamp(cat['trial_started_at']) if cat['trial_started_at'] else timestamp(config['created_at'])
+    engineering_closed=cat.get('engineering_ended_at') is not None and cat['trial_started_at'] is None
+    target_end=(start+7*DAY) if cat['trial_started_at'] else (timestamp(cat['engineering_ended_at']) if engineering_closed else now)
+    start=max(start,begin);end=max(start,min(begin+DAY,now,target_end));alerts=[]
+    receiver=supervisor.receiver();counts_known=True
+    try:
+        if head!=supervisor.local['head']:raise ValueError('Local and remote parent differ')
+        rows=receiver.processed_rows()
+    except (ValueError,OSError,KeyError) as exc:
+        rows=[];counts_known=False;alerts.append(dict(kind='raw_integrity_mismatch',reason=type(exc).__name__+': '+str(exc)))
+    feeds=[feed_report(rows,s,f,start,end,now) for s in ('BTCUSDT','ETHUSDT') for f in ('1h','4h','1d')]
+    if not counts_known:
+        for f in feeds:
+            for key in ('confirmed','missing_due','pending_grace','late','duplicates','revisions','on_time_success_rate','receipt_success_rate'):f[key]=None
+            f['missing_close_times_UTC']=None
+    for f in feeds:
+        if f['missing_due']:alerts.append(dict(kind='expected_close_missing',symbol=f['symbol'],timeframe=f['timeframe'],count=f['missing_due']))
+        if f['late']:alerts.append(dict(kind='collection_lag',symbol=f['symbol'],timeframe=f['timeframe'],count=f['late']))
+        if f['revisions']:alerts.append(dict(kind='source_revision',symbol=f['symbol'],timeframe=f['timeframe'],count=f['revisions']))
+    http=dict(observations=None,successful_complete_responses=None,success_rate=None)
+    if counts_known:
+        from p1_08d_receiver import read
+        batches=receiver._batches()
+        if batches:
+            last=read(batches[-1][0]/'summary.json')
+            if last['failed_requests']:alerts.append(dict(kind='source_http_error',count=last['failed_requests'],source='latest raw HTTP receipts'))
+            for key,kind in [('invalid_rows','source_payload_error'),('revision_rows','source_revision'),('zero_volume_rows','zero_volume')]:
+                if last[key]:alerts.append(dict(kind=kind,count=last[key],source='latest receiver summary'))
+            for flag in last['quality_flags']:alerts.append(dict(kind=flag,source='receiver clock/rate guard'))
+        receipts=[read(p) for folder,_ in batches for p in folder.glob('*.receipt.json')]
+        today=[r for r in receipts if begin<=timestamp(r['system_received_at'])<=min(begin+DAY,now,target_end)]
+        good=sum(r['http_status']==200 and not r['response_truncated'] and r['transport_error'] is None for r in today)
+        http=dict(observations=len(today),successful_complete_responses=good,success_rate=good/len(today) if today else None,
+            meaning='HTTP completion only, not bar quality or independent samples')
+        for f in feeds:
+            f['all_duplicate_observations_received_today']=sum(r.get('symbol')==f['symbol'] and r.get('timeframe')==f['timeframe'] and r['status']=='duplicate'
+                and begin<=timestamp(r['wire_received_at'])<=min(begin+DAY,now,target_end) for r in rows)
+    if not engineering_closed and now-timestamp(cat['last_backup_verified_at'])>7200000:alerts.append(dict(kind='backup_stale'))
+    if timestamp(cat['retention_until'])-now<30*DAY:alerts.append(dict(kind='retention_expiry_warning'))
+    if cat['lease'] is not None:alerts.append(dict(kind='lease_held',owner=cat['lease']))
+    if cat['status'] not in ('ready','lease_held'):alerts.append(dict(kind='operation_blocked',reason=cat['status']))
+    if now<timestamp(config['created_at']):alerts.append(dict(kind='clock_rollback'))
+    from p1_08e_ops import shutil
+    free=shutil.disk_usage(supervisor.root).free
+    if free<268435456:alerts.append(dict(kind='low_disk',free_bytes=free))
+    incidents=list((supervisor.root/'diagnostics').glob('*.json'))
+    if incidents:alerts.append(dict(kind='unresolved_local_incidents',count=len(incidents)))
+    return dict(version='p1-08e-daily-ops-v1',UTC_date=day,asof_UTC=utc(now),mode=config['mode'],
+        scope='pilot' if cat['trial_started_at'] else 'engineering_only_not_a_seven_day_trial',
+        window_start_UTC=utc(start),window_end_UTC=utc(end),engineering_closed=engineering_closed,feeds=feeds,http=http,alerts=alerts,
+        latest_remote_head=head,latest_valid_checkpoint=cat['receiver_checkpoint'],actual_counts_known=counts_known,backup_last_verified_UTC=cat['last_backup_verified_at'],
+        retention_until=cat['retention_until'],continue_conditions_met=not alerts and cat['status']=='ready' and not engineering_closed,
+        seven_day=seven_day_status(cat['trial_started_at'],now),active_trading_hypotheses=0,
+        external_timestamp_attestation_verified=False,nested_frames_are_independent_samples=False)
+
+
+def cli(argv=None):
+    from p1_08e_ops import Supervisor
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--root',type=Path,required=True);p.add_argument('--day',required=True);p.add_argument('--out',type=Path)
+    a=p.parse_args(argv);r=daily_report(Supervisor(a.root),a.day);text=json.dumps(r,indent=2)+'\n'
+    if a.out:
+        with a.out.open('x') as f:f.write(text)
+    else:print(text)
+    return 0
+
+
+if __name__=='__main__':raise SystemExit(cli())

@@ -1,0 +1,21 @@
+{
+  "version": "p1-08e-supervised-operations-v1",
+  "base_commit": "c3b27a6aaf33b8291b9b3c7559521433c3f44b99",
+  "scope": "Persistent state supervision, authoritative remote head and lease, raw backup and recovery, monitoring and a controlled real process interruption; no trading hypothesis",
+  "symbols": ["BTCUSDT", "ETHUSDT"],
+  "frames": ["1h", "4h", "1d"],
+  "schedule": {"utc_minute": 2, "poll_interval_hours": 1, "max_trial_hours": 168, "unattended_deployment_authorized": false},
+  "quality": {"collection_lag_ms": 300000, "min_free_disk_bytes": 268435456, "max_archive_payload_bytes": 536870912, "backup_expiry_warning_days": 30, "backup_max_age_ms": 7200000},
+  "authority": "Dedicated data-only Git branch in the existing repository; fetch actual latest head before I/O, ordinary fast-forward compare-and-push leases, no force-push, reject stale parent, no concurrent collection lease, no main/default-branch changes",
+  "backup": "Remote Git file inventory and checkpoint, independently fetched into fresh object store; data publication stays leased until readback succeeds; restore into a new local directory. Git is admin-deletable, not WORM",
+  "retention": {"minimum_months": 24, "policy_months": 27, "automatic_purge": false, "artifact_days": 45, "third_independent_copy_deployed": false},
+  "daily_denominator": "Per feed UTC close-exclusive in (session_start, min(day_end, asof)] only; grace windows, bootstrap, unknown and late arrivals separate; actual counts deduplicate source candle, not requests or timeframes",
+  "critical_stop": ["stale remote parent", "lease conflict", "checkpoint/hash mismatch", "clock anomaly", "low disk or capacity", "backup publish/readback failure", "unreviewed source/HTTP/quality anomaly"],
+  "real_drill": "Use actual public reception then SIGKILL a separate collection process, preserve partial state and UTC outage timestamps, verify process death, recover latest remotely saved valid state into new directory, re-fetch with actual current receipt; if no candle closes in the short outage, missing-bar count is zero, never fabricated",
+  "trial_status": "not_started until a supervised operator explicitly activates a configured persistent host; engineering/drill minutes never count as completed seven days",
+  "level2": "Requires at least real168h, all daily reports and checkpoints, backup evidence and resolved/explicit gaps. No synthetic clocks, repeated requests or projected days qualify",
+  "external_timestamp_attestation_verified": false,
+  "active_trading_hypotheses": 0,
+  "real_orders": 0,
+  "forbidden": ["main/P0/Genesis/formal-strategy or existing PR edits", "price-rule optimization", "real trading/auth/leverage", "paid service or new private credential provisioning", "permission expansion", "automatic merge"]
+}
