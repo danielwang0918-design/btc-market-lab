@@ -144,6 +144,21 @@ def split(t):return 'train' if t<money.CUTS[0] else 'validation' if t<money.CUTS
 def profile_dict(profile):return dict(zip(('population','model','period','scenario','policy'),profile))
 
 
+def exit_cash_attribution(accounts,actual):
+    result=[]
+    for account in accounts:
+        key={k:account[k] for k in ('model','period','scenario','policy')}
+        local=[r for r in actual if all(r[k]==v for k,v in key.items())]
+        pnl=sum((D(r['net_pnl_usdt']) for r in local),D(0))
+        if len(local)!=int(account['trade_count']) or abs(D(1000)+pnl-D(account['final_equity_USDT']))>D('1e-10'):
+            raise ValueError('Original position cash attribution mismatch')
+        for reason in sorted(set(('stop','stop_gap','target','max_hold_72h','calendar_boundary','data_gap_first_quote','integrity_review_exit'))|{r['exit_reason'] for r in local}):
+            group=[r for r in local if r['exit_reason']==reason]
+            result.append(dict(**key,exit_reason=reason,n=len(group),sum_archived_net_R=sum((D(r['r_multiple']) for r in group),D(0)),
+                net_pnl_USDT=sum((D(r['net_pnl_usdt']) for r in group),D(0)),fixed_trade_attribution_not_exit_intervention=True))
+    return result
+
+
 def scopes():return [('full',None)]+[(kind,h) for h in paths.HORIZONS for kind in ('held','tape')]
 
 
@@ -183,6 +198,7 @@ def _run(source_zip,out):
                     exit_time_ms=row['exit_time_ms'],exit_bar_ms=row['exit_bar_ms'],exit_reason=row['exit_reason'],
                     quantity=row['quantity'],planned_risk=row['planned_risk'],archived_net_R=row['r_multiple'],archived_net_pnl_USDT=row['net_pnl_usdt']))
         files.write_csv(out/'source_accounts.csv',accounts);files.write_csv(out/'profile_path_mapping.csv',mappings)
+        files.write_csv(out/'exit_cash_attribution.csv',exit_cash_attribution(accounts,actual))
         files.write_csv(out/'feature_catalog.csv',catalog())
         feature_table=Table(out/'feature_snapshots.csv');hold_table=Table(out/'held_path_labels.csv');horizon_table=Table(out/'fixed_horizon_labels.csv');touch_table=Table(out/'touch_time_labels.csv')
         feature_map={};cache={};quality=[]
@@ -277,7 +293,7 @@ def _run(source_zip,out):
         files.write_json(out/'hypothesis_decisions.json',dict(recommended_for_fresh_mechanism_replication=candidates,
             independent_strategy_evidence=False,positive_expectancy_claim=False,new_OOS=False,maximum_candidates=2,
             rejection_is_not_proof_all_features_useless=True))
-        report(out,source,seeds,timeout,contrasts,candidates)
+        report(out,source,seeds,timeout,contrasts,candidates,actual)
         plot(out,timeout,cache)
         result=dict(version='p1-08b-price-paths-v1',current_commit=os.getenv('GITHUB_SHA'),base_commit=BASE,source_zip_sha256=SOURCE_SHA,protocol_sha256=PROTOCOL_SHA,
             source_output_hashes_verified=len(source['output_sha256']),source_accounts=160,source_actual_rows=len(actual),source_isolated_rows=len(isolated),
@@ -361,7 +377,7 @@ def associations(out,isolated,seeds,cache,features):
     files.write_csv(out/'fixed_hypothesis_contrasts.csv',contrasts);return grouped,contrasts
 
 
-def report(out,source,seeds,timeout,contrasts,candidates):
+def report(out,source,seeds,timeout,contrasts,candidates,actual):
     fmt=lambda v:'—' if v is None else f'{float(v):.6f}'
     lines=['# P1-08B｜價格路徑與有效波動完整實測','',
         '先固定cf3af6f再計算；不重跑策略、不改退出／SL／TP／ATR／RR／AI或產生新本金。完整held、固定前綴及原exit後反事實行情帶分開；MFE不是可實現利潤。','',
@@ -378,6 +394,13 @@ def report(out,source,seeds,timeout,contrasts,candidates):
         avg=lambda key:sum(float(t[key]) for t in r)/len(r) if r else None
         lines.append(f'| {universe} | {len(r)} | {sum(t["mfe_R0_lower"]>=D(".5") for t in r)} | {sum(t["mfe_R0_lower"]>=1 for t in r)} | {sum(D(t["archived_net_R"])<0 for t in r)} | {fmt(avg("mfe_R0_lower"))} | {fmt(avg("giveback_R0_lower"))} |')
     lines+=['','這些peak、giveback與到達時間均是事後標籤；不能把觀察到峰值當成可成交最佳退出。完整6/12/24/48/72h分布在path_summary.csv／timeout_horizon_summary.csv，觸價interval及同棒未知在touch_time_labels.csv。','',
+        '## 先否證錯誤歸因：到期不是本段Test本金虧損主來源','',
+        '| 原退出 | n | 原逐筆淨R加總 | 原實際q損益USDT |','|---|---:|---:|---:|']
+    selected=[r for r in actual if (r['model'],r['period'],r['scenario'],r['policy'])==('fractional_spot','opened_test','source_stop_first','T20_CONT')]
+    for reason in ('stop','target','max_hold_72h'):
+        group=[r for r in selected if r['exit_reason']==reason]
+        lines.append(f'| {reason} | {len(group)} | {fmt(sum(D(r["r_multiple"]) for r in group))} | {fmt(sum(D(r["net_pnl_usdt"]) for r in group))} |')
+    lines+=['','28筆到期正負損益幾乎抵消；49筆Test主要本金缺口來自原SL與TP現金流差。這只歸因固定交易，不是刪除到期交易、改72h或改倉位後的反事實績效。R加總不是USDT報酬，原q／風險及時序權重不同，不能混算。','',
         '## 固定特徵假說：全部對照','',
         '| 假說 | 時段 | 範圍 | 標籤 | nA/nB | 差A−B | 95%共同區塊區間 |','|---|---|---|---|---|---:|---|']
     for r in contrasts:lines.append(f'| {r["hypothesis"]} | {r["period"]} | {r["universe"]} | {r["metric"]} | {r["n_a"]}/{r["n_b"]} | {fmt(r["delta"])} | [{fmt(r["low95"])},{fmt(r["high95"])}] |')
