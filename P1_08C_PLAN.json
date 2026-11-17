@@ -1,0 +1,29 @@
+{
+  "version": "p1-08c-forward-foundation-v1",
+  "base_commit": "330c87cc62252f8c1ee52756712954d5e0dfed30",
+  "scope": "Local append-only research registration, clock/integrity gates, public data feasibility and synthetic acceptance only; no new strategy or performance computation",
+  "active_hypotheses": [],
+  "qualified_strategy_count": 0,
+  "allowed_decision_frames": ["1h", "4h", "1d"],
+  "symbols": ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "ZECUSDT", "NEARUSDT", "DOGEUSDT"],
+  "registry": {
+    "storage": "separate immutable protocol, evidence, candidate and label JSON records, one global SHA256 chain; exclusive writer; verify pinned external checkpoint against every later chain",
+    "clock": "writer records actual UTC receipt/registration time; injected clocks only in explicitly synthetic registries; source publication unknown remains null",
+    "eligibility": "formation after frozen study start; closed 1H/4H/1D evidence; receipt before candidate; registration strictly before future observation; unconfirmed remains watch",
+    "versions": "deterministic event identity, append-only candidate revisions, label references exact candidate hash; never mutate prior candidate or protocol",
+    "labels": "separate results store; no result fields accepted in candidate; only after full predefined window; incomplete evidence means unknown results",
+    "security_limit": "hash chains and read-only files are tamper-evident against pinned checkpoints, not physical WORM storage or proof of trustworthy source/system clocks"
+  },
+  "forward_operational_floor_from_p1_08a": {
+    "calendar_months": 24,
+    "nonempty_common_28day_blocks": 20,
+    "eligible_opportunities_per_arm": 200,
+    "positive_and_negative_labels_per_arm_each": 30,
+    "btc_opportunities_per_arm": 30,
+    "statistical_power_guaranteed": false,
+    "review": "fixed calendar dates frozen by next real hypothesis, no performance-based early stopping, no real hypothesis activated in P1-08C"
+  },
+  "data_feasibility": "primary official public Spot documentation plus bounded no-key read-only connectivity probes; never turn failures or documentation examples into observed liquidity",
+  "acceptance": ["tests committed before implementation", "immutable baseline files", "causal time and schema negative cases", "candidate/result separation", "chain overwrite/truncation/checkpoint tests", "synthetic outputs visibly marked", "all Python tests with fixed dependencies", "download and verify final Actions artifact"],
+  "forbidden": ["strategy replay or tuning", "historical Test selection", "real orders", "private API keys", "exchange account permissions", "leverage", "automatic merge", "large high-frequency platform"]
+}

@@ -1,0 +1,46 @@
+{
+  "verified_at": "2026-11-17T03:05:24.573075+00:00",
+  "method": "GitHub connector official repository file fetch; normalized bytes verified against Git blob SHA1; documentation only, no market observations",
+  "sources": [
+    {
+      "name": "market_data_only.md",
+      "url": "https://github.com/binance/binance-spot-api-docs/blob/master/faqs/market_data_only.md",
+      "git_blob_sha1": "b76644e5e34dc800d148f133620ed5798333163d",
+      "sha256": "b4aa5cc3f918f9a72c3d055bd4a36d9b8a77c1020cd253458ba573e328cb7997",
+      "bytes": 1631,
+      "verified_git_blob": true
+    },
+    {
+      "name": "rest-api.md",
+      "url": "https://github.com/binance/binance-spot-api-docs/blob/master/rest-api.md",
+      "git_blob_sha1": "e7b6eade603cd0db0fc88e717ba67a58e19e0089",
+      "sha256": "f1500faf7ede9e1b24087e31e3d2517eb56db28f1d936fdfde845ce418ae3ca8",
+      "bytes": 211871,
+      "verified_git_blob": true
+    },
+    {
+      "name": "web-socket-streams.md",
+      "url": "https://github.com/binance/binance-spot-api-docs/blob/master/web-socket-streams.md",
+      "git_blob_sha1": "13ff0fbb678fce98e8b767f4ac93d15afab8f6dc",
+      "sha256": "0bbb4383f4656287ea27bb81013db5f1cc03b95036f16b3331042e91dd305387",
+      "bytes": 27021,
+      "verified_git_blob": true
+    },
+    {
+      "name": "public_data_README.md",
+      "url": "https://github.com/binance/binance-public-data/blob/master/README.md",
+      "git_blob_sha1": "e01e34a0b0cd91d62386a5a237190a3167138bae",
+      "sha256": "2e133d9945a9263a02781369078e72805eff074680f305cd5460016471c6caad",
+      "bytes": 5282,
+      "verified_git_blob": true
+    },
+    {
+      "name": "dataset_TERMS.md",
+      "url": "https://github.com/binance/binance-public-data/blob/master/TERMS_AND_CONDITIONS.md",
+      "git_blob_sha1": "d47bf55acfd83456d6fe57b31f400b42bda83c19",
+      "sha256": "99c4921dbe023cd68c1a447775707d621453cc78aec6ac0bfe2e6c06a5114ee0",
+      "bytes": 9807,
+      "verified_git_blob": true
+    }
+  ]
+}

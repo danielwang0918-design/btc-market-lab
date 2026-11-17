@@ -1,0 +1,61 @@
+{
+  "study_key": "SYNTHETIC_ONLY",
+  "hypothesis": {
+    "id": "fixture",
+    "statement": "Infrastructure fixture, no trading hypothesis",
+    "falsification": "Any causal/integrity violation"
+  },
+  "rule": {
+    "id": "fixture",
+    "version": "test-v1",
+    "code_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "study_start_at": "2030-01-01T00:00:00+00:00",
+  "review_dates": [
+    "2031-01-02T00:00:00+00:00",
+    "2032-01-02T00:00:00+00:00"
+  ],
+  "arms": [
+    "all"
+  ],
+  "features": {
+    "last_close": {
+      "definition": "last closed price; fixture only",
+      "code_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "dtype": "number",
+      "lookback_bars": {
+        "1h": 1
+      }
+    },
+    "rvol20": {
+      "definition": "Prior 20 closed candles excluding current; fixture lacks history so remains unknown",
+      "code_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "dtype": "number",
+      "lookback_bars": {
+        "1h": 21
+      }
+    }
+  },
+  "label_names": [
+    "diagnostic_end_close",
+    "diagnostic_max_high"
+  ],
+  "label_calculator_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "horizons_hours": [
+    6,
+    12,
+    24,
+    48,
+    72
+  ],
+  "observation_anchor": "next_1h_boundary_after_registration",
+  "costs": {
+    "fee_bps_per_side": 10,
+    "slippage_bps_per_side": [
+      5,
+      15
+    ],
+    "paper_initial_USDT": 1000,
+    "risk_fraction": 0.02
+  }
+}
