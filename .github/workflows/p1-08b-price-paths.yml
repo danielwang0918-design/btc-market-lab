@@ -72,6 +72,11 @@ jobs:
           for name,digest in m['output_sha256'].items():assert hashlib.sha256((root/name).read_bytes()).hexdigest()==digest,name
           with ZipFile('research/p1_08b_evidence/inputs/p1-08a-source.zip') as z:
               assert z.read('results/archived_accounts.csv')==(root/'source_accounts.csv').read_bytes()
+          attribution=list(rows('exit_cash_attribution.csv'))
+          for account in rows('source_accounts.csv'):
+              local=[r for r in attribution if all(r[k]==account[k] for k in ('model','period','scenario','policy'))]
+              assert sum(int(r['n']) for r in local)==int(account['trade_count'])
+              assert abs(D(1000)+sum(D(r['net_pnl_USDT']) for r in local)-D(account['final_equity_USDT']))<D('1e-10')
           fixed_count=0;keys=set()
           for r in rows('fixed_horizon_labels.csv'):
               fixed_count+=1;h=int(r['requested_horizon_hours']);assert h in (6,12,24,48,72)
