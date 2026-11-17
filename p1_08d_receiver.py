@@ -164,8 +164,18 @@ class Receiver:
                 if meta['raw_sha256']!=c.sha_bytes(raw) or meta['raw_bytes']!=len(raw) or meta['url']!=url(meta['endpoint'],meta['symbol'],meta['timeframe']):raise ValueError('Receipt/raw/source mismatch')
                 metas[meta['raw_file']]=meta
             summary=read(folder/'summary.json')
+            time_caps=[x for x in metas.values() if x['endpoint']=='time']
+            reference=server_reference(time_caps[0],(folder/time_caps[0]['raw_file']).read_bytes()) if time_caps else None
+            if reference!=m['closure_reference_server_ms']:raise ValueError('Closure reference differs from raw server response')
             if summary['clock_context_verified']:
+                if len(time_caps)!=2 or reference is None or server_reference(time_caps[-1],(folder/time_caps[-1]['raw_file']).read_bytes()) is None:
+                    raise ValueError('Incomplete raw clock context')
+                for x in metas.values():
+                    elapsed=c.timestamp(x['system_received_at'])-c.timestamp(x['request_started_at'])
+                    if not x['clock_locally_consistent'] or elapsed<0 or abs(elapsed-x['monotonic_elapsed_ms'])>2000 or x['monotonic_elapsed_ms']>10000:
+                        raise ValueError('Receipt clock evidence inconsistent')
                 last_good=max([last_good]+[c.timestamp(x['system_received_at']) for x in metas.values()])
+            elif m['registry_after']!=m['registry_before']:raise ValueError('Unverified clock cannot advance evidence')
             for item in read(folder/'processed.json'):
                 processed.append(item)
                 if item['status'] not in ('new','duplicate','source_revision'):continue
@@ -300,7 +310,9 @@ class Receiver:
             self.verify();return summary
 
     def projections(self):
-        self.verify();rows=self.processed_rows();out={}
+        v=self.verify();rows=self.processed_rows();out={};batches=self._batches()
+        last_rows=read(batches[-1][0]/'processed.json') if batches else []
+        last_summary=read(batches[-1][0]/'summary.json') if batches else {}
         for symbol in self.contract['symbols']:
             for frame in self.contract['frames']:
                 local=[r for r in rows if r.get('symbol')==symbol and r.get('timeframe')==frame and r['status']=='new'];flags=[]
@@ -311,6 +323,9 @@ class Receiver:
                 if c.number(latest['normalized_input']['ohlcv']['volume'])==0:flags.append('zero_volume')
                 if latest['collection_lag_ms']>300000:flags.append('collection_lag_exceeds_5min')
                 if latest['availability_class']=='bootstrap_backfill':flags.append('bootstrap_not_contemporaneous')
+                if not last_summary.get('clock_context_verified') or not any(x.get('symbol')==symbol and x.get('timeframe')==frame and x['status'] in ('new','duplicate') for x in last_rows):flags.append('latest_poll_unverified')
+                if self.clock()<v['last_good_wall_ms']:flags.append('clock_rollback_at_readout')
+                if latest['close_exclusive_ms']<((self.clock()-1000)//c.FRAMES[frame])*c.FRAMES[frame]:flags.append('missing_latest_closed_at_readout')
                 record=self.registry.get(latest['registry_sha256'])
                 out[symbol+'/'+frame]=dict(close=float(c.number(latest['normalized_input']['ohlcv']['close'])),close_at=latest['normalized_input']['close_at'],
                     evidence_sha256=latest['registry_sha256'],wire_received_at=latest['wire_received_at'],registry_ingested_at=record['recorded_at'],
@@ -319,10 +334,12 @@ class Receiver:
         return out
 
     def snapshot(self,target):
-        self.verify()
-        with ZipFile(target,'x',compression=ZIP_DEFLATED) as z:
-            for p in sorted(self.root.rglob('*')):
-                if p.is_file():z.write(p,str(p.relative_to(self.root)))
+        with self._writer():
+            before=self.checkpoint()
+            with ZipFile(target,'x',compression=ZIP_DEFLATED) as z:
+                for p in sorted(self.root.rglob('*')):
+                    if p.name!='.receiver-lock':z.write(p,str(p.relative_to(self.root)))
+            if self.checkpoint()!=before:raise ValueError('Receiver changed while taking snapshot')
         return c.sha_file(Path(target))
 
     @classmethod
@@ -334,8 +351,9 @@ class Receiver:
             if len(names)!=len(set(names)) or any(PurePosixPath(n).is_absolute() or '..' in PurePosixPath(n).parts or '\\' in n for n in names):raise ValueError('Unsafe snapshot paths')
             dest.mkdir(parents=True)
             for info in z.infolist():
-                if info.is_dir() or ((info.external_attr>>16)&0o170000)==0o120000 or info.file_size>MAX_BYTES*3:raise ValueError('Unexpected snapshot entry')
+                if ((info.external_attr>>16)&0o170000)==0o120000 or info.file_size>MAX_BYTES*3:raise ValueError('Unexpected snapshot entry')
                 p=dest/PurePosixPath(info.filename);p.parent.mkdir(parents=True,exist_ok=True)
+                if info.is_dir():p.mkdir(exist_ok=True);continue
                 with p.open('xb') as f:f.write(z.read(info))
                 p.chmod(0o444)
         r=cls(dest,clock=clock,opener=opener,expected_mode=expected_mode);r.verify(anchor=anchor);return r

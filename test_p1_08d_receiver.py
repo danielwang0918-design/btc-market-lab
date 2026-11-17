@@ -73,8 +73,10 @@ class ReceiverTests(unittest.TestCase):
         self.assertFalse(features['BTCUSDT/1h']['candidate_registration_enabled'])
 
     def test_exact_close_safety_boundary_is_conservative(self):
-        self.now=T+2*H+500;self.collect()
-        self.assertEqual(self.r.verify()['normalized_evidence'],1)
+        self.now=T+2*H+500
+        r=mod.Receiver.create(self.root.parent/'boundary',mode='synthetic',symbols=['BTCUSDT'],frames=['1h'],clock=lambda:self.now,opener=self.open_it)
+        r.collect(include_liquidity=False)
+        self.assertEqual(r.verify()['normalized_evidence'],1)
 
     def test_restart_and_duplicates_do_not_create_extra_evidence(self):
         self.collect();cp=self.r.checkpoint();self.now+=1000
