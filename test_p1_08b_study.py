@@ -6,6 +6,15 @@ import p1_08b_paths as paths
 
 
 class StudyTests(unittest.TestCase):
+    def test_exit_cash_attribution_keeps_account_sizes_not_deduplicated_path_money(self):
+        base=dict(model='fractional_spot',scenario='source_stop_first',policy='T20_CONT',trade_count='1')
+        accounts=[dict(base,period='train',final_equity_USDT='990'),dict(base,period='continuous',final_equity_USDT='995')]
+        actual=[dict(base,period='train',event_id='same',exit_reason='stop',net_pnl_usdt='-10',r_multiple='-1'),
+                dict(base,period='continuous',event_id='same',exit_reason='stop',net_pnl_usdt='-5',r_multiple='-1')]
+        rows=m.exit_cash_attribution(accounts,actual)
+        result={r['period']:r['net_pnl_USDT'] for r in rows if r['exit_reason']=='stop'}
+        self.assertEqual(result,{'train':D(-10),'continuous':D(-5)})
+
     def test_zero_trade_account_profile_does_not_require_a_trade_side(self):
         row=dict(model='fractional_spot',period='train',scenario='source_stop_first',policy='ML_GATE')
         self.assertEqual(m.identity(row,'actual_account'),('actual_account','fractional_spot','train','source_stop_first','ML_GATE'))
