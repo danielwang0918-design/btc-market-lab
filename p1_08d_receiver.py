@@ -152,7 +152,10 @@ class Receiver:
         contract=read(self.root/'contract.json');body={k:v for k,v in contract.items() if k!='contract_sha256'}
         if contract!=self.contract or contract['contract_sha256']!=c.sha_bytes(c.canonical(body)) or contract['version']!=VERSION or contract['plan_sha256']!=c.sha_file(PLAN):raise ValueError('Frozen receiver contract drift')
         if contract['candidate_registration_enabled'] or contract['active_trading_hypotheses']!=0:raise ValueError('No trading hypothesis authorized')
-        self.registry.verify(anchor=contract['registry_genesis']);records=self.registry._records();index={r['record_sha256']:r for r in records}
+        verified_registry=self.registry.verify(anchor=contract['registry_genesis'])
+        expected_registry_mode='synthetic' if contract['mode']=='synthetic' else 'prospective'
+        if verified_registry['mode']!=expected_registry_mode:raise ValueError('Receiver mode differs from original registry; no synthetic/real mixing')
+        records=self.registry._records();index={r['record_sha256']:r for r in records}
         if any(r['kind'] in ('candidates','labels') for r in records):raise ValueError('No candidate/price label generation authorized in data-only receiver')
         batches=self._batches();cp=contract['registry_genesis'];bound=set();receipts=0;processed=[];last_good=c.timestamp(contract['receiver_started_at'])
         for folder,m in batches:
@@ -168,7 +171,8 @@ class Receiver:
             reference=server_reference(time_caps[0],(folder/time_caps[0]['raw_file']).read_bytes()) if time_caps else None
             if reference!=m['closure_reference_server_ms']:raise ValueError('Closure reference differs from raw server response')
             if summary['clock_context_verified']:
-                if len(time_caps)!=2 or reference is None or server_reference(time_caps[-1],(folder/time_caps[-1]['raw_file']).read_bytes()) is None:
+                end_reference=server_reference(time_caps[-1],(folder/time_caps[-1]['raw_file']).read_bytes()) if time_caps else None
+                if len(time_caps)!=2 or reference is None or end_reference is None or end_reference<reference:
                     raise ValueError('Incomplete raw clock context')
                 for x in metas.values():
                     elapsed=c.timestamp(x['system_received_at'])-c.timestamp(x['request_started_at'])
@@ -252,7 +256,8 @@ class Receiver:
                     if limited:flags.append('rate_limited')
                     else:
                         end_raw,end_meta=get('time')
-                        if server_reference(end_meta,end_raw) is None or not all(m['clock_locally_consistent'] for m in metas):flags.append('server_clock_unverified')
+                        end_reference=server_reference(end_meta,end_raw)
+                        if end_reference is None or end_reference<server_ms or not all(m['clock_locally_consistent'] for m in metas):flags.append('server_clock_unverified')
                         else:summary['clock_context_verified']=True
             prior={}
             for x in history:
