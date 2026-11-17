@@ -17,6 +17,7 @@ import shutil
 import socket
 import subprocess
 import tempfile
+import time
 import uuid
 
 from p1_08d_receiver import Receiver,read,write,c
@@ -33,6 +34,7 @@ class GitArchive:
             self.cache.mkdir(parents=True);subprocess.run(['git','init','--bare','--quiet',str(self.cache)],check=True)
             self.git(['config','user.name','BTC Market Lab supervised data archive'])
             self.git(['config','user.email','btc-market-lab-research@users.noreply.github.com'])
+            self.git(['config','credential.helper','!gh auth git-credential'])
 
     def git(self,args,*,data=None,env=None):
         p=subprocess.run(['git','--git-dir='+str(self.cache)]+args,input=data,stdout=subprocess.PIPE,stderr=subprocess.PIPE,env=env)
@@ -125,7 +127,7 @@ class Supervisor:
         if mode=='real_public' and remote!='https://github.com/danielwang0918-design/btc-market-lab.git':raise ValueError('Use the existing authorized repo only; no new service or credentials')
 
     @classmethod
-    def create(cls,root,*,remote,branch,snapshot,snapshot_sha256,checkpoint,mode,clock=None,opener=None):
+    def create(cls,root,*,remote,branch,snapshot,snapshot_sha256,checkpoint,mode,clock=None,opener=None,baseline_files=None):
         cls._check_remote(remote,mode);root=Path(root)
         if root.exists():raise ValueError('New durable state root required')
         if mode!='synthetic' and (clock is not None or opener is not None):raise ValueError('No fake real I/O')
@@ -138,6 +140,9 @@ class Supervisor:
         config=dict(version=VERSION,mode=mode,created_at=c.utc(now),base_commit='c3b27a6aaf33b8291b9b3c7559521433c3f44b99',
             plan_sha256=c.sha_file(PLAN),retention_until=c.utc(c.add_months(now,27)),external_timestamp_attestation_verified=False)
         write(root/'state/config.json',config)
+        for name,path in (baseline_files or {}).items():
+            if not re.fullmatch(r'[a-z0-9_.-]+',name):raise ValueError('Safe baseline file name required')
+            dest=root/'state/frozen-baseline'/name;dest.parent.mkdir(exist_ok=True);dest.write_bytes(Path(path).read_bytes());dest.chmod(0o444)
         catalog=dict(version=VERSION,mode=mode,generation=0,lease=None,status='ready',trial_started_at=None,
             receiver_checkpoint=receiver.checkpoint(),retention_until=config['retention_until'],last_backup_verified_at=c.utc(now),
             external_timestamp_attestation_verified=False)
@@ -241,6 +246,12 @@ class Supervisor:
                 try:os.kill(cat['lease']['pid'],0)
                 except ProcessLookupError:pass
                 else:raise ValueError('Lease-owner PID is still alive; do not steal lease')
+            partial=death_evidence.get('partial_state_zip')
+            if partial:
+                p=Path(partial)
+                if c.sha_file(p)!=death_evidence.get('partial_state_sha256'):raise ValueError('Interrupted-state evidence digest differs')
+                dest=self.root/'state/incidents'/('interrupted-'+uuid.uuid4().hex+'.zip');dest.parent.mkdir(exist_ok=True)
+                dest.write_bytes(p.read_bytes());dest.chmod(0o444)
             final,_=self._finish(expected_head,cat,event=dict(kind='controlled_recovery',death_evidence=death_evidence),status='ready')
             return final
 
@@ -263,6 +274,12 @@ class Supervisor:
             final,_=self._finish(lease,cat,event=dict(kind='daily_report',report=report),status='ready')
             return final,report
 
+    def record_note(self,*,expected_head,kind,evidence):
+        with self._lock():
+            self._guard(expected_head);lease=self.reserve(expected_head=expected_head);cat=self.archive.catalog(lease)
+            final,_=self._finish(lease,cat,event=dict(kind=kind,evidence=evidence),status='ready')
+            return final
+
     def status(self):
         from p1_08e_monitor import seven_day_status
         head=self.head();cat=self.archive.catalog(head)
@@ -272,12 +289,29 @@ class Supervisor:
 
 
 def cli(argv=None):
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('command',choices=['cycle','status','restore'])
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('command',choices=['cycle','status','restore','start-trial','run','daily'])
     p.add_argument('--root',type=Path,required=True);p.add_argument('--expected-head');p.add_argument('--remote');p.add_argument('--branch')
+    p.add_argument('--operator-id');p.add_argument('--durable-host');p.add_argument('--confirm-persistence',action='store_true');p.add_argument('--day')
     a=p.parse_args(argv)
     if a.command=='restore':o=Supervisor.restore(a.root,remote=a.remote,branch=a.branch,expected_head=a.expected_head,mode='real_public');result=o.status()
     else:
-        o=Supervisor(a.root);result=o.cycle(expected_head=a.expected_head) if a.command=='cycle' else o.status()
+        o=Supervisor(a.root)
+        if a.command=='cycle':result=o.cycle(expected_head=a.expected_head)
+        elif a.command=='start-trial':result=o.start_trial(expected_head=a.expected_head,operator_id=a.operator_id or '',durable_host=a.durable_host or '',persistence_confirmed=a.confirm_persistence)
+        elif a.command=='daily':result=o.record_daily_report(expected_head=a.expected_head,day=a.day)
+        elif a.command=='run':
+            cat=o.archive.catalog(o.head())
+            if cat['trial_started_at'] is None:raise ValueError('Explicitly activate a durable supervised trial first; engineering is not seven-day operation')
+            end=c.timestamp(cat['trial_started_at'])+168*3600000
+            while o.clock()<end and not (o.root/'STOP').exists():
+                now=o.clock();slot=(now//3600000)*3600000+120000
+                if slot<=now:slot+=3600000
+                while o.clock()<min(slot,end) and not (o.root/'STOP').exists():time.sleep(max(0,min(30,(min(slot,end)-o.clock())/1000)))
+                if o.clock()>=end or (o.root/'STOP').exists():break
+                result=o.cycle(expected_head=o.local['head']);print(json.dumps(result),flush=True)
+                if result['status']!='ok':raise ValueError('Operational quality failed; leave state for supervised review')
+            result=o.status()
+        else:result=o.status()
     print(json.dumps(result,indent=2));return 0
 
 
