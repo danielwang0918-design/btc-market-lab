@@ -33,6 +33,12 @@ class OpsTests(unittest.TestCase):
         with self.assertRaises(ValueError):self.o.cycle(expected_head=head)
         self.assertEqual(len(self.case.calls),n)
 
+    def test_long_running_scheduler_refreshes_completed_local_publication(self):
+        other=ops.Supervisor(self.root,clock=self.clock,opener=self.case.open_it)
+        other.cycle(expected_head=other.head());fresh=other.head()
+        result=self.o.cycle(expected_head=None)
+        self.assertEqual(result['parent_head'],fresh)
+
     def test_lease_prevents_second_collector_before_io(self):
         head=self.o.head();lease=self.o.reserve(expected_head=head);n=len(self.case.calls)
         other=ops.Supervisor.restore(self.base/'other',remote=str(self.remote),branch=self.o.branch,expected_head=lease,
