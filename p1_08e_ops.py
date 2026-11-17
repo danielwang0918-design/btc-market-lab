@@ -185,6 +185,10 @@ class Supervisor:
             finally:fcntl.flock(lock,fcntl.LOCK_UN)
 
     def _guard(self,expected_head,*,allow_lease=False):
+        fresh=read(self.root/'local.json')
+        for key in ('remote','branch','mode','root_pin'):
+            if fresh[key]!=self.local[key]:raise ValueError('Local authority identity changed')
+        self.local['head']=fresh['head']
         actual=self.head()
         if actual!=expected_head or actual!=self.local['head']:raise ValueError(f'Stale parent: expected={expected_head}, local={self.local["head"]}, actual={actual}; no public data I/O')
         self.archive.git(['merge-base','--is-ancestor',self.local['root_pin'],actual])
@@ -228,9 +232,14 @@ class Supervisor:
     def cycle(self,*,expected_head):
         with self._lock():
             try:
+                if expected_head is None:expected_head=read(self.root/'local.json')['head']
                 lease=self.reserve(expected_head=expected_head);cat=self.archive.catalog(lease)
                 summary=self.receiver().collect()
-                status='ready' if summary['status']=='ok' and summary['zero_volume_rows']==0 else 'blocked_quality'
+                config=read(self.root/'state/config.json');begin=c.timestamp(cat['trial_started_at'] or config['created_at'])
+                latest=self.receiver()._batches()[-1][0]
+                late=sum(r['status']=='new' and r.get('close_exclusive_ms',0)>begin and r.get('collection_lag_ms',0)>300000 for r in read(latest/'processed.json'))
+                summary=dict(summary,post_start_late_rows=late)
+                status='ready' if summary['status']=='ok' and summary['zero_volume_rows']==0 and late==0 else 'blocked_quality'
                 final,proof=self._finish(lease,cat,event=dict(kind='collection',parent_head=expected_head,summary=summary),status=status)
                 return dict(status='ok' if status=='ready' else status,parent_head=expected_head,published_head=final,
                     remote_readback_verified=True,receiver_checkpoint=proof['receiver_checkpoint'],summary=summary,
@@ -284,8 +293,9 @@ class Supervisor:
 
     def close_engineering(self,*,expected_head):
         with self._lock():
-            self._guard(expected_head);lease=self.reserve(expected_head=expected_head);cat=self.archive.catalog(lease)
+            cat=self._guard(expected_head)
             if cat['trial_started_at'] is not None:raise ValueError('This operation only closes engineering, not an active pilot')
+            lease=self.reserve(expected_head=expected_head);cat=self.archive.catalog(lease)
             cat['engineering_ended_at']=c.utc(self.clock())
             final,_=self._finish(lease,cat,event=dict(kind='engineering_session_closed',closed_at=cat['engineering_ended_at'],seven_day_trial_started=False),status='ready')
             return final
@@ -318,7 +328,7 @@ def cli(argv=None):
                 if slot<=now:slot+=3600000
                 while o.clock()<min(slot,end) and not (o.root/'STOP').exists():time.sleep(max(0,min(30,(min(slot,end)-o.clock())/1000)))
                 if o.clock()>=end or (o.root/'STOP').exists():break
-                result=o.cycle(expected_head=o.local['head']);print(json.dumps(result),flush=True)
+                result=o.cycle(expected_head=None);print(json.dumps(result),flush=True)
                 if result['status']!='ok':raise ValueError('Operational quality failed; leave state for supervised review')
             result=o.status()
         else:result=o.status()
