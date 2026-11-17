@@ -37,6 +37,7 @@ class PathTests(unittest.TestCase):
         self.assertEqual(r['mfe_R0_upper'],5)
         self.assertEqual(r['mae_R0_lower'],1)
         self.assertTrue(r['envelope_may_include_unheld_extremes'])
+        self.assertIsNone(r['close_efficiency_proxy'])  # No held hourly close.
 
     def test_future_high_does_not_enter_held_prefix_but_tape_is_flagged(self):
         rows=[bar(i,h=105 if i<3 else 200) for i in range(6)]
