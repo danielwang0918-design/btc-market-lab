@@ -313,6 +313,11 @@ class Registry:
         records.sort(key=lambda r:r['sequence'])
         if not records or records[0]['kind']!='protocols' or len([r for r in records if r['kind']=='protocols'])!=1:raise ValueError('Exactly one first frozen protocol required')
         initial=records[0]['payload'];mode=initial['mode']
+        exact(initial,{'protocol','mode','registry_id','frozen_at','writer_code_sha256','allowed_symbols','allowed_timeframes','independent_forward_evidence_claim'})
+        if (initial['allowed_symbols']!=list(SYMBOLS) or initial['allowed_timeframes']!=list(FRAMES)
+                or initial['frozen_at']!=records[0]['recorded_at'] or initial['independent_forward_evidence_claim'] is not False):
+            raise ValueError('Frozen first-record contract changed')
+        digest(initial['writer_code_sha256']);text(initial['registry_id'])
         if mode not in MODES:raise ValueError('Unknown registry mode')
         if self.clock is not None and mode!='synthetic':raise ValueError('Injected clock on non-synthetic registry')
         protocol=initial['protocol'];validate_protocol(protocol,timestamp(records[0]['recorded_at']),mode)
@@ -350,6 +355,8 @@ class Registry:
             with temp.open('xb') as stream:
                 stream.write(canonical(r)+b'\n');stream.flush();os.fsync(stream.fileno())
             os.chmod(temp,0o444)
+            if kind=='candidates' and self._now()>=timestamp(payload['observation_start_at']):
+                raise ValueError('Observation started before local sealing; do not commit')
             os.link(temp,file)  # Atomic, no replacement even if a destination appeared.
             fd=os.open(folder,os.O_RDONLY)
             try:os.fsync(fd)
