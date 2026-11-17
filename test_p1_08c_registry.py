@@ -192,11 +192,22 @@ class RegistryTests(unittest.TestCase):
 
     def test_feature_lookback_gap_is_not_silently_accepted(self):
         p=protocol();p['features']['last_close']['lookback_bars']={'1h':2}
+        self.t=T-1
         other=registry.Registry.create(self.root.parent/'second',p,mode='synthetic',clock=lambda:self.t)
+        self.t=T+H+1000
         a=other.ingest(candle(T-2*H));b=other.ingest(candle())
         c=self.candidate(evidence_ids=[a['record_sha256'],b['record_sha256']])
         c['features']['last_close']['evidence_ids']=c['evidence_ids']
         with self.assertRaises(ValueError):other.register(c)
+
+    def test_equivalent_utc_representation_cannot_duplicate_an_event(self):
+        self.register();c=self.candidate()
+        c['formed_at']=c['formed_at'].replace('+00:00','Z')
+        with self.assertRaises(ValueError):self.r.register(c)
+
+    def test_receipt_unknown_fields_remain_visible(self):
+        self.assertIn('quote_volume_unknown',self.e['payload']['quality_flags'])
+        self.assertIn('source_market_event_time_unknown',self.e['payload']['quality_flags'])
 
     def test_candidate_does_not_accept_outcome_fields(self):
         for key in ('mfe_R0','label_completed_at','exit_time','realized_net_R'):
