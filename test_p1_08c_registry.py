@@ -219,6 +219,19 @@ class RegistryTests(unittest.TestCase):
         c=self.candidate();ticks=iter([self.t,self.t-1000]);self.r.clock=lambda:next(ticks)
         with self.assertRaises(ValueError):self.r.register(c)
 
+    def test_clock_rollback_during_evidence_seal_rejected(self):
+        ticks=iter([self.t,self.t-1000]);self.r.clock=lambda:next(ticks)
+        with self.assertRaises(ValueError):self.r.ingest(candle(T-H))
+
+    def test_protocol_must_seal_before_study_start(self):
+        ticks=iter([T-1,T])
+        with self.assertRaises(ValueError):registry.Registry.create(self.root.parent/'late-protocol',protocol(),mode='synthetic',clock=lambda:next(ticks))
+
+    def test_real_study_need_not_wait_for_month_boundary(self):
+        p=protocol();p['study_start_at']=registry.utc(T+5*H)
+        r=registry.Registry.create(self.root.parent/'midday-start',p,mode='synthetic',clock=lambda:T-1)
+        self.assertEqual(r.verify()['records'],1)
+
     def test_changed_writer_code_requires_new_frozen_registry(self):
         with patch.object(registry,'sha_file',return_value='b'*64):
             with self.assertRaises(ValueError):self.register()
