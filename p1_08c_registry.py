@@ -155,7 +155,10 @@ def evidence_payload(c,now,records):
     if any(r['kind']=='evidence' and (r['payload']['symbol'],r['payload']['timeframe'],timestamp(r['payload']['open_at']),r['payload']['source']['id'])==key for r in records):
         raise ValueError('Duplicate candle evidence; corrections require a separately identified source revision')
     return dict(**deepcopy(c),received_at=utc(now),normalized_input_sha256=sha_bytes(canonical(c)),
-        quality_flags=(['zero_volume'] if v==0 else [])+(['source_publication_time_unknown'] if source['published_at'] is None else []))
+        quality_flags=(['zero_volume'] if v==0 else [])
+            +(['source_publication_time_unknown'] if source['published_at'] is None else [])
+            +(['source_market_event_time_unknown'] if source['market_event_at'] is None else [])
+            +(['quote_volume_unknown'] if q is None else []))
 
 
 def references(ids,index,*,kind='evidence',symbol=None):
@@ -219,7 +222,7 @@ def candidate_payload(c,now,records,p,mode):
     exact(c['quality'],{'data_gaps','delays','unknown_fields'})
     for value in c['quality'].values():strings(value)
     text(c['market_event_key'])
-    identity=dict(study_key=p['study_key'],rule=p['rule'],symbol=symbol,timeframe=frame,formed_at=c['formed_at'],market_event_key=c['market_event_key'])
+    identity=dict(study_key=p['study_key'],rule=p['rule'],symbol=symbol,timeframe=frame,formed_at=utc(formed),market_event_key=c['market_event_key'])
     event_id=sha_bytes(canonical(identity))
     versions=[r for r in records if r['kind']=='candidates' and r['payload']['event_id']==event_id]
     expected=versions[-1]['record_sha256'] if versions else None
