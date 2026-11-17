@@ -215,6 +215,26 @@ class RegistryTests(unittest.TestCase):
         with self.assertRaises(ValueError):self.r.register(c)
         self.assertEqual(self.r.verify()['records'],before)
 
+    def test_clock_rollback_during_seal_rejected(self):
+        c=self.candidate();ticks=iter([self.t,self.t-1000]);self.r.clock=lambda:next(ticks)
+        with self.assertRaises(ValueError):self.r.register(c)
+
+    def test_changed_writer_code_requires_new_frozen_registry(self):
+        with patch.object(registry,'sha_file',return_value='b'*64):
+            with self.assertRaises(ValueError):self.register()
+
+    def test_candidate_propagates_unknown_input_fields(self):
+        c=self.register()['payload']
+        self.assertIn('quote_volume_unknown',c['quality']['unknown_fields'])
+        self.assertIn('source_market_event_time_unknown',c['quality']['unknown_fields'])
+
+    def test_positive_prospective_mode_still_needs_external_attestation(self):
+        with patch.object(registry,'system_ms',return_value=T-1):
+            r=registry.Registry.create(self.root.parent/'actual-clock-api-fixture',protocol(),mode='prospective')
+        self.assertEqual(r.verify()['mode'],'prospective')
+        self.assertFalse(r.verify()['independent_forward_evidence_claim'])
+        with self.assertRaises(ValueError):registry.Registry(r.root,clock=lambda:T)
+
     def test_changed_first_record_universe_is_not_valid_even_with_new_hash(self):
         file=self.root/'protocols'/'0000000001.json';r=json.loads(file.read_text())
         r['payload']['allowed_timeframes']=['15m']
