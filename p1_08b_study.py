@@ -309,6 +309,7 @@ def associations(out,isolated,seeds,cache,features):
         continuous={key:number(key) for key in numeric if key!='entry_ATR_pct'}
         continuous['entry_ATR_pct']=100*number('ATR14_1h')/e if number('ATR14_1h') is not None else None
         rows.append(dict(event_id=source['event_id'],path_id=pid,policy=source['policy'],symbol=source['symbol'],side=source['side'],
+            scenario=source['scenario'],
             entry_time_ms=int(source['entry_time_ms']),period=split(int(source['entry_time_ms'])),label_complete=label['complete'],
             contains_post_exit_prices=label['contains_post_exit_prices'],mfe_R0=label['mfe_R0_lower'] if label['complete'] else None,
             mae_R0=label['mae_R0_lower'] if label['complete'] else None,
@@ -318,12 +319,19 @@ def associations(out,isolated,seeds,cache,features):
             **continuous,known_entry_cost_share=cost,
             cost_share_bin='<=.25' if cost<=D('.25') else '>.25'))
     files.write_csv(out/'association_event_table.csv',rows)
+    overlap_rows=[]
+    for policy,side,(period,(start,end)),universe,h in itertools.product(('A','S_ATR1','T20_FAIL','T20_CONT'),('long','short'),calendars.PERIODS.items(),('all_eight','BTC','other_seven'),(24,72)):
+        all_rows=[r for r in rows if r['policy']==policy and r['side']==side and start<=r['entry_time_ms']<end and (universe=='all_eight' or (r['symbol']=='BTCUSDT' if universe=='BTC' else r['symbol']!='BTCUSDT'))]
+        complete=[dict(r,reserved_until_ms=r['entry_time_ms']+h*money.H) for r in all_rows if cache[r['path_id']]['horizons'][('tape',h)]['complete']]
+        overlap_rows.append(dict(policy=policy,side=side,period=period,universe=universe,horizon_hours=h,scenario='source_stop_first',
+            eligible_events=len(all_rows),complete_labels=len(complete),**stats.overlap_summary(complete),label_role='counterfactual_tape_not_positions'))
+    files.write_csv(out/'fixed_tape_overlap.csv',overlap_rows)
     grouped=[];correlations=[]
     for policy,side,(period,(start,end)),universe in itertools.product(('A','S_ATR1','T20_FAIL','T20_CONT'),('long','short'),calendars.PERIODS.items(),('all_eight','BTC','other_seven')):
         local=[r for r in rows if r['policy']==policy and r['side']==side and start<=r['entry_time_ms']<end and (universe=='all_eight' or (r['symbol']=='BTCUSDT' if universe=='BTC' else r['symbol']!='BTCUSDT'))]
         for predictor,metric in itertools.product((*numeric,'known_entry_cost_share'),('mfe_R0','mae_R0','mfe_ATRpre')):
             pairs=[(float(r[predictor]),float(r[metric])) for r in local if r[predictor] is not None and r[metric] is not None]
-            correlations.append(dict(policy=policy,side=side,period=period,universe=universe,predictor=predictor,posthoc_metric=metric,
+            correlations.append(dict(policy=policy,side=side,period=period,universe=universe,scenario='source_stop_first',predictor=predictor,posthoc_metric=metric,
                 n_pairs=len(pairs),pearson_r=correlation([a for a,b in pairs],[b for a,b in pairs]),small_sample=len(pairs)<30,
                 role='descriptive_only_no_iid_pvalue_or_feature_selection'))
         for field,categories in ASSOCIATION_BINS.items():
@@ -332,7 +340,7 @@ def associations(out,isolated,seeds,cache,features):
                 def avg(key):
                     values=[float(r[key]) for r in valid if r[key] is not None]
                     return sum(values)/len(values) if values else None
-                grouped.append(dict(policy=policy,side=side,period=period,universe=universe,feature=field,category=category,
+                grouped.append(dict(policy=policy,side=side,period=period,universe=universe,scenario='source_stop_first',feature=field,category=category,
                     n=len(subset),n_complete=len(valid),n_post_exit_tape=sum(r['contains_post_exit_prices'] for r in subset),
                     n_mfe_ATRpre=sum(r['mfe_ATRpre'] is not None for r in valid),
                     mean_mfe_R0=avg('mfe_R0'),mean_mae_R0=avg('mae_R0'),mean_mfe_ATRpre=avg('mfe_ATRpre'),mean_mfe_price_pct=avg('mfe_price_pct'),small_sample=len(valid)<30))
@@ -344,7 +352,7 @@ def associations(out,isolated,seeds,cache,features):
             local=[r for r in rows if r['policy']=='T20_CONT' and r['side']=='long' and start<=r['entry_time_ms']<end and r[metric] is not None and (universe=='all_eight' or (r['symbol']=='BTCUSDT' if universe=='BTC' else r['symbol']!='BTCUSDT'))]
             ra=[dict(r,net_R=r[metric]) for r in local if r[field]==a];rb=[dict(r,net_R=r[metric]) for r in local if r[field]==b]
             ci=stats.block_difference(ra,rb,start,end)
-            contrasts.append(dict(hypothesis=hid,period=period,universe=universe,metric=metric,A=a,B=b,n_a=len(ra),n_b=len(rb),
+            contrasts.append(dict(hypothesis=hid,period=period,universe=universe,scenario='source_stop_first',metric=metric,A=a,B=b,n_a=len(ra),n_b=len(rb),
                 estimate_a=ci['group_a_mean_R'],estimate_b=ci['group_b_mean_R'],delta=ci['difference_R'],low95=ci['difference_low95'],high95=ci['difference_high95'],
                 undefined_resamples=ci['undefined_resamples'],calendar_blocks=ci['calendar_blocks'],nonempty_blocks_a=ci['group_a_nonempty_blocks'],nonempty_blocks_b=ci['group_b_nonempty_blocks'],
                 label_scope='24h_counterfactual_reference_tape',replications=1000,seed=808))

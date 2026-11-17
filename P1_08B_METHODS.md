@@ -36,6 +36,8 @@
 
 成本的可得時間另分清楚：原正常停損成本占比使用實際entry報價與已知SL，只有eligible-entry時點可知，不冒稱在最初登記前已知。另列prebreak ATR/C_pre與`−net_unit(C_pre,C_pre,slip)/ATR_pre`（5/15bps），只用突破前已閉close，作波動相對摩擦代理；不是新增1ATR止損或進場條件。連續特徵相關全數輸出，不依相關值選新候選；不報iid p值。到期MFE／回吐另以同28日區塊估計均值區間，仍是事後label而非收益區間。
 
+價格MFE_R0／MFE/preATR不因費用變動而變成新的行情樣本；特徵關聯只取每事件主5bps的單一source_stop_first版本，明列scenario。15bps對成本、R_model及原帳戶的影響在各情境path／summary完整保留，不將相同價格重複為獨立證據。`association_event_table.csv`是特徵與事後label的**研究連接表**，不能整表當進場特徵；乾淨輸入只取feature_snapshots及catalog允許欄位。
+
 ## 探索關聯與最多兩個假說
 
 全部固定分組輸出：壓縮1、實體.5、突破距離ATR .5/1、ER .2/.4、RVOL .8/1.2、位置區間、三週期MA、成本占比.25。這些是先固定的診斷分組，不修改策略。所有組含不足／未知及零樣本，不依Test挑最佳。
