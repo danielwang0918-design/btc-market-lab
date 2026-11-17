@@ -157,6 +157,13 @@ class OpsTests(unittest.TestCase):
         self.assertEqual(result['status'],'blocked_quality')
         with self.assertRaises(ValueError):self.o.cycle(expected_head=result['published_head'])
 
+    def test_post_start_late_close_is_archived_and_blocks_continuation(self):
+        self.case.now=fixture.T+3*fixture.H+600000
+        self.case.rows=[fixture.row(fixture.T+fixture.H),fixture.row(fixture.T+2*fixture.H),fixture.row(fixture.T+3*fixture.H)]
+        result=self.o.cycle(expected_head=self.o.head())
+        self.assertEqual(result['status'],'blocked_quality')
+        self.assertEqual(result['summary']['post_start_late_rows'],1)
+
     def test_original_data_and_seven_day_status_are_preserved(self):
         records=self.o.receiver().registry._records();head=self.o.head();self.o.cycle(expected_head=head)
         self.assertEqual(self.o.receiver().registry._records(),records)
