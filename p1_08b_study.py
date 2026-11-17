@@ -24,7 +24,9 @@ ASSOCIATION_BINS={'compression_bin':('<1','>=1','unknown'),'body_bin':('>=.5','<
     'extension_bin':('<.5','.5-1','>=1','unknown'),'ER_pre_bin':('range_proxy','mixed','efficient_move_proxy','unknown'),
     'break_rvol_bin':('low','normal','high','insufficient_history','gap_in_lookback','zero_prior_mean','unknown'),
     'range_position_bin':('below_range','inside_range','above_range','unknown'),
-    **{'MA_'+f:stats.STATE_CLASSES['MA'] for f in core.FRAMES},'cost_share_bin':('<=.25','>.25','unknown')}
+    **{'MA_'+f:stats.STATE_CLASSES['MA'] for f in core.FRAMES},'cost_share_bin':('<=.25','>.25','unknown'),
+    'ER_state_1h':stats.STATE_CLASSES['ER_state'],'rvol_bin_1h':stats.STATE_CLASSES['rvol_bin'],
+    'volatility_change_1h':stats.STATE_CLASSES['volatility_change'],'ATR_level_1h':stats.STATE_CLASSES['ATR_level']}
 
 
 class Table:
@@ -295,13 +297,17 @@ def legacy_index(bars):
 def associations(out,isolated,seeds,cache,features):
     rows=[]
     numeric=('compression_ratio','body_share','upper_wick_share','lower_wick_share','close_extension_ATR','extreme_extension_ATR',
-        'ER_pre','break_rvol','preclose_location_20D','breakclose_location_20D','prebreak_ATR_pct','flat_cost5_over_ATR_pre','flat_cost15_over_ATR_pre')
+        'ER_pre','break_rvol','preclose_location_20D','breakclose_location_20D','prebreak_ATR_pct','flat_cost5_over_ATR_pre','flat_cost15_over_ATR_pre',
+        'ER20_1h','rvol_1h','entry_ATR_pct')
     for source in isolated:
         if source['scenario']!='source_stop_first':continue
         pid=path_key(source);label=cache[pid]['horizons'][('tape',24)]
         f=features[(source['policy'],source['event_id'],'entry')];atr=f['ATR_pre'];price=D(source['raw_entry'])
         e,s,r0,risk,slip=paths.units(source)
         cost=(risk-r0)/risk
+        def number(key):return D(str(f[key])) if f.get(key) not in ('',None) else None
+        continuous={key:number(key) for key in numeric if key!='entry_ATR_pct'}
+        continuous['entry_ATR_pct']=100*number('ATR14_1h')/e if number('ATR14_1h') is not None else None
         rows.append(dict(event_id=source['event_id'],path_id=pid,policy=source['policy'],symbol=source['symbol'],side=source['side'],
             entry_time_ms=int(source['entry_time_ms']),period=split(int(source['entry_time_ms'])),label_complete=label['complete'],
             contains_post_exit_prices=label['contains_post_exit_prices'],mfe_R0=label['mfe_R0_lower'] if label['complete'] else None,
@@ -309,7 +315,7 @@ def associations(out,isolated,seeds,cache,features):
             mfe_ATRpre=label['mfe_price_lower']/atr if label['complete'] and atr is not None and atr>0 else None,
             mfe_price_pct=100*label['mfe_price_lower']/price if label['complete'] else None,
             **{key:f.get(key,'unknown') for key in ASSOCIATION_BINS if key!='cost_share_bin'},
-            **{key:f.get(key) for key in numeric},known_entry_cost_share=cost,
+            **continuous,known_entry_cost_share=cost,
             cost_share_bin='<=.25' if cost<=D('.25') else '>.25'))
     files.write_csv(out/'association_event_table.csv',rows)
     grouped=[];correlations=[]
