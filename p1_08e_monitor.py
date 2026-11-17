@@ -51,10 +51,18 @@ def daily_report(supervisor,day,*,asof=None):
     if begin>now:raise ValueError('No invented report for a future UTC day')
     head=supervisor.head();cat=supervisor.archive.catalog(head);config=__import__('p1_08d_receiver').read(supervisor.root/'state/config.json')
     start=timestamp(cat['trial_started_at']) if cat['trial_started_at'] else timestamp(config['created_at'])
-    start=max(start,begin);end=min(begin+DAY,now)
-    receiver=supervisor.receiver();rows=receiver.processed_rows()
+    target_end=(start+7*DAY) if cat['trial_started_at'] else now
+    start=max(start,begin);end=max(start,min(begin+DAY,now,target_end));alerts=[]
+    receiver=supervisor.receiver();counts_known=True
+    try:
+        if head!=supervisor.local['head']:raise ValueError('Local and remote parent differ')
+        rows=receiver.processed_rows()
+    except (ValueError,OSError,KeyError) as exc:
+        rows=[];counts_known=False;alerts.append(dict(kind='raw_integrity_mismatch',reason=type(exc).__name__+': '+str(exc)))
     feeds=[feed_report(rows,s,f,start,end,now) for s in ('BTCUSDT','ETHUSDT') for f in ('1h','4h','1d')]
-    alerts=[]
+    if not counts_known:
+        for f in feeds:
+            for key in ('confirmed','missing_due','pending_grace','late','duplicates','revisions','on_time_success_rate','receipt_success_rate'):f[key]=None
     for f in feeds:
         if f['missing_due']:alerts.append(dict(kind='expected_close_missing',symbol=f['symbol'],timeframe=f['timeframe'],count=f['missing_due']))
         if f['late']:alerts.append(dict(kind='collection_lag',symbol=f['symbol'],timeframe=f['timeframe'],count=f['late']))
@@ -64,10 +72,15 @@ def daily_report(supervisor,day,*,asof=None):
     if cat['lease'] is not None:alerts.append(dict(kind='lease_held',owner=cat['lease']))
     if cat['status'] not in ('ready','lease_held'):alerts.append(dict(kind='operation_blocked',reason=cat['status']))
     if now<timestamp(config['created_at']):alerts.append(dict(kind='clock_rollback'))
+    from p1_08e_ops import shutil
+    free=shutil.disk_usage(supervisor.root).free
+    if free<268435456:alerts.append(dict(kind='low_disk',free_bytes=free))
+    incidents=list((supervisor.root/'diagnostics').glob('*.json'))
+    if incidents:alerts.append(dict(kind='unresolved_local_incidents',count=len(incidents)))
     return dict(version='p1-08e-daily-ops-v1',UTC_date=day,asof_UTC=utc(now),mode=config['mode'],
         scope='pilot' if cat['trial_started_at'] else 'engineering_only_not_a_seven_day_trial',
         window_start_UTC=utc(start),window_end_UTC=utc(end),feeds=feeds,alerts=alerts,
-        latest_remote_head=head,latest_valid_checkpoint=receiver.checkpoint(),backup_last_verified_UTC=cat['last_backup_verified_at'],
+        latest_remote_head=head,latest_valid_checkpoint=cat['receiver_checkpoint'],actual_counts_known=counts_known,backup_last_verified_UTC=cat['last_backup_verified_at'],
         retention_until=cat['retention_until'],continue_conditions_met=not alerts and cat['status']=='ready',
         seven_day=seven_day_status(cat['trial_started_at'],now),active_trading_hypotheses=0,
         external_timestamp_attestation_verified=False,nested_frames_are_independent_samples=False)

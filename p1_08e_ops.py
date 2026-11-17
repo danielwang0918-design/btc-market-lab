@@ -188,7 +188,11 @@ class Supervisor:
         if cat['status']!='ready' and not allow_lease:raise ValueError('Unresolved operational condition; operator review required')
         config=read(self.root/'state/config.json')
         if config['plan_sha256']!=c.sha_file(PLAN):raise ValueError('Frozen operational plan drift')
-        self.receiver().verify(anchor=cat['receiver_checkpoint'])
+        verified=self.receiver().verify(anchor=cat['receiver_checkpoint'])
+        if verified['checkpoint']!=cat['receiver_checkpoint']:raise ValueError('Unpublished local receiver advance; recover explicitly, never adopt a hidden fork')
+        if self.clock()<verified['last_good_wall_ms']:raise ValueError('Clock rollback before collection')
+        local_files={'state/'+str(p.relative_to(self.root/'state')) for p in (self.root/'state').rglob('*') if p.is_file()}
+        if local_files!=set(cat['files_sha256']):raise ValueError('Unpublished/unknown local files; stop and audit')
         for name,digest in cat['files_sha256'].items():
             path=self.root/name
             if not path.is_file() or path.is_symlink() or c.sha_file(path)!=digest:raise ValueError('Local raw/checkpoint inventory drift')
@@ -233,8 +237,31 @@ class Supervisor:
             if cat['lease'] is None or death_evidence.get('process_dead') is not True or not isinstance(death_evidence.get('returncode'),int) or death_evidence['returncode']>=0:
                 raise ValueError('Cannot clear a lease without explicit stopped-process evidence')
             if self.local['mode']=='real_public' and death_evidence.get('pid')!=cat['lease']['pid']:raise ValueError('Stopped PID is not the lease owner')
+            if self.local['mode']=='real_public' and cat['lease']['host']==socket.gethostname():
+                try:os.kill(cat['lease']['pid'],0)
+                except ProcessLookupError:pass
+                else:raise ValueError('Lease-owner PID is still alive; do not steal lease')
             final,_=self._finish(expected_head,cat,event=dict(kind='controlled_recovery',death_evidence=death_evidence),status='ready')
             return final
+
+    def start_trial(self,*,expected_head,operator_id,durable_host,persistence_confirmed):
+        if persistence_confirmed is not True or not operator_id.strip() or not durable_host.strip():raise ValueError('Explicit operator and durable host attestation required')
+        with self._lock():
+            cat=self._guard(expected_head)
+            if cat['trial_started_at'] is not None:raise ValueError('Trial already started; never backdate or restart its clock')
+            lease=self.reserve(expected_head=expected_head);cat=self.archive.catalog(lease)
+            cat['trial_started_at']=c.utc(self.clock())
+            final,_=self._finish(lease,cat,event=dict(kind='pilot_activation',operator_id=operator_id,durable_host=durable_host,
+                persistence_is_operator_attested_not_platform_certified=True,trial_started_at=cat['trial_started_at']),status='ready')
+            return final
+
+    def record_daily_report(self,*,expected_head,day):
+        from p1_08e_monitor import daily_report
+        with self._lock():
+            self._guard(expected_head);report=daily_report(self,day)
+            lease=self.reserve(expected_head=expected_head);cat=self.archive.catalog(lease)
+            final,_=self._finish(lease,cat,event=dict(kind='daily_report',report=report),status='ready')
+            return final,report
 
     def status(self):
         from p1_08e_monitor import seven_day_status
