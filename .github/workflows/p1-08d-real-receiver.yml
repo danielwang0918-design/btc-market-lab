@@ -4,6 +4,11 @@ on:
     branches: ["codex/p1-08d-real-receiver"]
     paths: ["p1_08d_*.py", "test_p1_08d_*.py", "P1_08D_*", ".github/workflows/p1-08d-real-receiver.yml"]
   workflow_dispatch:
+    inputs:
+      parent_reference_json:
+        description: 'Optional pinned prior capture reference JSON; no credentials. Empty uses committed P1_08D_PARENT.json.'
+        required: false
+        default: ''
 permissions:
   contents: read
   actions: read
@@ -54,22 +59,28 @@ jobs:
       - name: Start data-only receiver or restore pinned external parent
         env:
           GH_TOKEN: ${{ github.token }}
+          PARENT_REFERENCE_JSON: ${{ inputs.parent_reference_json || '' }}
         run: |
           python - <<'PY'
-          import os,subprocess
+          import os,subprocess,json
           from pathlib import Path
-          from p1_08d_receiver import Receiver,read
+          from p1_08d_receiver import Receiver,read,write
           from p1_08d_retention import verify_retained_bundle
           root=Path('research/real_receiver');root.parent.mkdir(exist_ok=True)
           parent=Path('P1_08D_PARENT.json')
-          if parent.exists():
-              p=read(parent);base='repos/'+os.environ['GITHUB_REPOSITORY']+'/actions/artifacts/'+str(int(p['capture_artifact_id']))
+          supplied=os.environ.get('PARENT_REFERENCE_JSON','').strip()
+          p=json.loads(supplied) if supplied else (read(parent) if parent.exists() else None)
+          if p:
+              write('research/used-parent-reference.json',p)
+              base='repos/'+os.environ['GITHUB_REPOSITORY']+'/actions/artifacts/'+str(int(p['capture_artifact_id']))
               for suffix,name in [('', 'parent-metadata.json'),('/zip','parent-capture.zip')]:
                   with Path('research',name).open('xb') as f:subprocess.run(['gh','api',base+suffix],stdout=f,check=True)
               meta=read('research/parent-metadata.json')
               assert meta['digest']==p['capture_artifact_digest']
               verification=verify_retained_bundle(Path('research/parent-capture.zip'),meta,Path('research/parent-independent-check'),
                   expected_commit=p['commit'],expected_run_id=int(p['run_id']))
+              if 'receiver_checkpoint' in p:assert verification['receiver_checkpoint']==p['receiver_checkpoint']
+              write('research/parent-checkpoint.json',verification['receiver_checkpoint'])
               payload=Path('research/parent-independent-check/downloaded_capture')
               manifest=read(payload/'bundle_manifest.json')
               Receiver.restore(payload/'receiver_snapshot.zip',root,expected_sha256=manifest['files_sha256']['receiver_snapshot.zip'],
@@ -82,10 +93,18 @@ jobs:
         run: python p1_08d_receiver.py collect --root research/real_receiver --out research/restarted-collection.json
       - name: Seal real capture bundle
         run: |
-          python p1_08d_retention.py bundle --root research/real_receiver --out research/capture-bundle
           python - <<'PY'
+          import os
+          from pathlib import Path
           from p1_08d_receiver import Receiver,write,read
+          from p1_08d_retention import publish_bundle
           r=Receiver('research/real_receiver');v=r.verify()
+          parent=Path('research/parent-checkpoint.json')
+          if parent.exists():assert r.verify(anchor=read(parent))['anchor_consistent']
+          context={k:os.environ[v] for k,v in [('commit','GITHUB_SHA'),('run_id','GITHUB_RUN_ID'),('run_attempt','GITHUB_RUN_ATTEMPT')]}
+          ref=Path('research/used-parent-reference.json')
+          context['parent_reference']=read(ref) if ref.exists() else None
+          publish_bundle(r,Path('research/capture-bundle'),context=context)
           rows=[x for x in r.processed_rows() if x['status']=='new']
           feeds={(x['symbol'],x['timeframe']) for x in rows}
           folder,manifest=r._batches()[-1]
@@ -95,6 +114,7 @@ jobs:
               and all((s,'1h') in current_feeds for s in ('BTCUSDT','ETHUSDT')))
           write('research/real-reception-acceptance.json',dict(actual_BTC_ETH_closed1h_received=ok,
               raw_and_registry_hashes_verified=True,external_timestamp_attestation_verified=False,
+              parent_checkpoint_preserved=parent.exists(),
               candidates=0,active_trading_hypotheses=0,long_term_operational_stability_proven=False))
           assert ok,'Real egress/closed1h acceptance incomplete; never substitute synthetic data'
           PY
