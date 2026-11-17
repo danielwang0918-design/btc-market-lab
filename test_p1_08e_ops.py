@@ -107,6 +107,15 @@ class OpsTests(unittest.TestCase):
         self.assertEqual(self.o.head(),published);self.assertEqual(report['seven_day']['status'],'not_started')
         self.assertEqual(list((self.root/'state/events').glob('*.json'))[-1].name,'0000000001.json')
 
+    def test_closed_engineering_session_does_not_invent_future_missing_bars(self):
+        import p1_08e_monitor as monitor
+        self.o.close_engineering(expected_head=self.o.head());self.case.now+=8*3600000
+        r=monitor.daily_report(self.o,'2030-01-01')
+        self.assertTrue(r['engineering_closed']);self.assertFalse(r['continue_conditions_met'])
+        self.assertEqual(sum(f['expected'] for f in r['feeds']),0)
+        self.assertEqual(r['seven_day']['status'],'not_started')
+        with self.assertRaises(ValueError):self.o.cycle(expected_head=self.o.head())
+
     def test_two_racing_publishers_have_only_one_collection_lease(self):
         from concurrent.futures import ThreadPoolExecutor
         from threading import Barrier
