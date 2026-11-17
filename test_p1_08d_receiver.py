@@ -241,6 +241,14 @@ class ReceiverTests(unittest.TestCase):
         self.r.opener=lambda req,timeout:Response({'code':-1121,'msg':'synthetic API error'}) if '/klines?' in req.full_url else original(req,timeout)
         r=self.collect();self.assertGreater(r['invalid_rows'],0);self.assertEqual(r['new_evidence'],0)
 
+    def test_truncated_but_parseable_response_cannot_confirm_evidence(self):
+        original=self.open_it
+        def oversized(req,timeout):
+            if '/klines?' not in req.full_url:return original(req,timeout)
+            response=Response(self.rows);response.raw+=b' '*(mod.MAX_BYTES+1);return response
+        self.r.opener=oversized;r=self.collect()
+        self.assertGreater(r['failed_requests'],0);self.assertEqual(r['new_evidence'],0)
+
     def test_snapshot_path_traversal_rejected(self):
         from zipfile import ZipFile
         archive=self.root.parent/'malicious.zip'
