@@ -185,6 +185,7 @@ class Receiver:
                 processed.append(item)
                 if item['status'] not in ('new','duplicate','source_revision'):continue
                 meta=metas[item['raw_file']];row=c.load_json((folder/item['raw_file']).read_bytes())[item['row_index']]
+                if meta['http_status']!=200 or meta['response_truncated'] or meta['transport_error']:raise ValueError('Untrusted/partial response cannot support confirmed evidence')
                 normalized,closed,row_hash=normalize(row,item['symbol'],item['timeframe'],meta,m['closure_reference_server_ms'],item['row_index'])
                 if not closed or row_hash!=item['raw_row_sha256'] or normalized!=item['normalized_input']:raise ValueError('Closed-row semantic normalization drift')
                 if item['status']=='source_revision':continue
@@ -280,7 +281,7 @@ class Receiver:
                 if x['status']=='new':prior[(x['symbol'],x['timeframe'],x['open_ms'])]=x
             if summary['clock_context_verified']:
                 for meta in metas:
-                    if meta['endpoint'] not in ('klines','bookTicker','depth') or meta['http_status']!=200:continue
+                    if meta['endpoint'] not in ('klines','bookTicker','depth') or meta['http_status']!=200 or meta['response_truncated'] or meta['transport_error']:continue
                     try:data=c.load_json((stage/meta['raw_file']).read_bytes())
                     except ValueError:summary['invalid_rows']+=1;continue
                     if meta['endpoint']!='klines':
