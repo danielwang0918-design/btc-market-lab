@@ -1,0 +1,25 @@
+{
+  "run_id": 44022284590,
+  "commit": "28b56b0c2c0b7c25bef86670f6fdef93b812fedd",
+  "capture_artifact_id": 14300934473,
+  "capture_artifact_digest": "sha256:421a359bf0af8b27e0af3214708733fc53f1bb07219fc4c483239ca0934e214b",
+  "independent_acceptance_artifact_id": 14302270078,
+  "independent_acceptance_artifact_sha256": "b40064b18d1834e64abbf734bc2b5a012ba666a6b4787b73a7dc092c6dc2f1a2",
+  "parent_batches": 2,
+  "parent_raw_receipts": 24,
+  "parent_normalized_evidence": 12,
+  "receiver_checkpoint": {
+    "version": "p1-08d-receiver-v1",
+    "contract_sha256": "e1a6587d13d5c092f5ef275eae8712b962db3cd3d1ecd405fddb3c3f589ab239",
+    "batch_count": 2,
+    "batch_sha256": "6a47951aa55a53253165715dd839adc6e60dfc51016b206968e7f5f76e78b202",
+    "registry_checkpoint": {
+      "version": "p1-08c-journal-v1",
+      "registry_id": "18b0f34c-5c31-4360-8ce9-e755ab82b32a",
+      "sequence": 13,
+      "recorded_at": "2026-11-17T05:11:50.154000+00:00",
+      "record_sha256": "73c9edab641f16c3d6060cd6e3ffe964d108c270d11c2b9aca7f7e7d8366c29f"
+    }
+  },
+  "external_timestamp_attestation_verified": false
+}
