@@ -186,11 +186,12 @@ class Supervisor:
 
     def _guard(self,expected_head,*,allow_lease=False):
         actual=self.head()
-        if actual!=expected_head or actual!=self.local['head']:raise ValueError('Stale parent/local state; stop before public data I/O')
+        if actual!=expected_head or actual!=self.local['head']:raise ValueError(f'Stale parent: expected={expected_head}, local={self.local["head"]}, actual={actual}; no public data I/O')
         self.archive.git(['merge-base','--is-ancestor',self.local['root_pin'],actual])
         cat=self.archive.catalog(actual)
         if cat['lease'] is not None and not allow_lease:raise ValueError('Global collection lease already held; no second collector')
         if cat['status']!='ready' and not allow_lease:raise ValueError('Unresolved operational condition; operator review required')
+        if cat.get('engineering_ended_at') and cat['trial_started_at'] is None:raise ValueError('Engineering session is closed; create an explicit fresh supervised pilot, never count its idle time')
         config=read(self.root/'state/config.json')
         if config['plan_sha256']!=c.sha_file(PLAN):raise ValueError('Frozen operational plan drift')
         verified=self.receiver().verify(anchor=cat['receiver_checkpoint'])
@@ -201,7 +202,8 @@ class Supervisor:
         for name,digest in cat['files_sha256'].items():
             path=self.root/name
             if not path.is_file() or path.is_symlink() or c.sha_file(path)!=digest:raise ValueError('Local raw/checkpoint inventory drift')
-        if shutil.disk_usage(self.root).free<268435456:raise ValueError('Low disk: stop before receiving more data')
+        free=shutil.disk_usage(self.root).free
+        if free<268435456:raise ValueError(f'Low disk: free={free}, floor=268435456; stop before I/O')
         return cat
 
     def reserve(self,*,expected_head):
@@ -228,7 +230,7 @@ class Supervisor:
             try:
                 lease=self.reserve(expected_head=expected_head);cat=self.archive.catalog(lease)
                 summary=self.receiver().collect()
-                status='ready' if summary['status']=='ok' else 'blocked_quality'
+                status='ready' if summary['status']=='ok' and summary['zero_volume_rows']==0 else 'blocked_quality'
                 final,proof=self._finish(lease,cat,event=dict(kind='collection',parent_head=expected_head,summary=summary),status=status)
                 return dict(status='ok' if status=='ready' else status,parent_head=expected_head,published_head=final,
                     remote_readback_verified=True,receiver_checkpoint=proof['receiver_checkpoint'],summary=summary,
@@ -278,6 +280,14 @@ class Supervisor:
         with self._lock():
             self._guard(expected_head);lease=self.reserve(expected_head=expected_head);cat=self.archive.catalog(lease)
             final,_=self._finish(lease,cat,event=dict(kind=kind,evidence=evidence),status='ready')
+            return final
+
+    def close_engineering(self,*,expected_head):
+        with self._lock():
+            self._guard(expected_head);lease=self.reserve(expected_head=expected_head);cat=self.archive.catalog(lease)
+            if cat['trial_started_at'] is not None:raise ValueError('This operation only closes engineering, not an active pilot')
+            cat['engineering_ended_at']=c.utc(self.clock())
+            final,_=self._finish(lease,cat,event=dict(kind='engineering_session_closed',closed_at=cat['engineering_ended_at'],seven_day_trial_started=False),status='ready')
             return final
 
     def status(self):
