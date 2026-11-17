@@ -192,9 +192,11 @@ class RegistryTests(unittest.TestCase):
 
     def test_feature_lookback_gap_is_not_silently_accepted(self):
         p=protocol();p['features']['last_close']['lookback_bars']={'1h':2}
-        other=registry.Registry.create(self.root/'invalid-place',p,mode='synthetic',clock=lambda:T-1)
-        # Separate root is required by the journal contract, not a nested registry.
-        with self.assertRaises(ValueError):self.r.verify()
+        other=registry.Registry.create(self.root.parent/'second',p,mode='synthetic',clock=lambda:self.t)
+        a=other.ingest(candle(T-2*H));b=other.ingest(candle())
+        c=self.candidate(evidence_ids=[a['record_sha256'],b['record_sha256']])
+        c['features']['last_close']['evidence_ids']=c['evidence_ids']
+        with self.assertRaises(ValueError):other.register(c)
 
     def test_candidate_does_not_accept_outcome_fields(self):
         for key in ('mfe_R0','label_completed_at','exit_time','realized_net_R'):
