@@ -209,6 +209,7 @@ class Receiver:
     def collect(self,*,include_liquidity=True):
         with self._writer():
             v=self.verify()
+            history=self.processed_rows()
             if self.contract['receiver_code_sha256']!=c.sha_file(Path(__file__)):raise ValueError('Receiver writer version drift; freeze a new receiver version')
             stage=self.root/('.pending-'+uuid.uuid4().hex);stage.mkdir();items=[];metas=[];flags=[]
             summary=dict(status='ok',new_evidence=0,duplicate_rows=0,revision_rows=0,open_rows=0,invalid_rows=0,
@@ -244,7 +245,7 @@ class Receiver:
                         if server_reference(end_meta,end_raw) is None or not all(m['clock_locally_consistent'] for m in metas):flags.append('server_clock_unverified')
                         else:summary['clock_context_verified']=True
             prior={}
-            for x in self.processed_rows():
+            for x in history:
                 if x['status']=='new':prior[(x['symbol'],x['timeframe'],x['open_ms'])]=x
             if summary['clock_context_verified']:
                 for meta in metas:

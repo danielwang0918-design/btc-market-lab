@@ -121,6 +121,25 @@ class ReceiverTests(unittest.TestCase):
         self.assertEqual(result['new_evidence'],0)
         self.assertIn('server_clock_unverified',result['quality_flags'])
 
+    def fresh(self):
+        self.now=T+3*H+10000;self.rows=[row(T+2*H),row(T+3*H)];self.collect()
+        self.assertTrue(self.r.projections()['BTCUSDT/1h']['data_quality_ready'])
+
+    def test_outage_invalidates_prior_readiness(self):
+        self.fresh();self.failure='network';self.now+=1000;self.collect()
+        self.assertFalse(self.r.projections()['BTCUSDT/1h']['data_quality_ready'])
+
+    def test_missing_next_closed_bar_is_stale_at_readout(self):
+        self.fresh();self.now=T+4*H+10000
+        self.assertFalse(self.r.projections()['BTCUSDT/1h']['data_quality_ready'])
+
+    def test_closure_reference_must_match_actual_server_response(self):
+        self.collect();folder=next((self.root/'batches').iterdir());p=folder/'manifest.json';m=json.loads(p.read_text())
+        m['closure_reference_server_ms']+=12345
+        m['batch_sha256']=mod.c.sha_bytes(mod.c.canonical({k:v for k,v in m.items() if k!='batch_sha256'}))
+        p.chmod(0o644);p.write_bytes(mod.c.canonical(m)+b'\n')
+        with self.assertRaises(ValueError):self.r.verify()
+
     def test_wall_clock_rollback_persists_diagnostic_and_no_evidence(self):
         self.collect();self.now-=1000;before=self.r.verify()['normalized_evidence']
         r=self.collect();self.assertIn('clock_rollback',r['quality_flags'])
